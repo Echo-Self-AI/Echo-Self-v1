@@ -24,6 +24,11 @@ type registerRequest struct {
 	DisplayName string `json:"display_name" binding:"required"`
 }
 
+type loginRequest struct {
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerRequest
 
@@ -65,4 +70,43 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, result)
+}
+
+func (h *AuthHandler) Login(c *gin.Context) {
+	var req loginRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	result, err := h.auth.Login(ctx, services.LoginInput{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidCredentials):
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid email or password",
+			})
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(err, context.Canceled):
+			c.JSON(http.StatusRequestTimeout, gin.H{
+				"error": "request timed out",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "login failed",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

@@ -36,12 +36,18 @@ func main() {
 	}
 	defer sqlDB.Close()
 
+	tokenService, err := services.NewTokenService(cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("JWT configuration failed: %v", err)
+	}
+
 	userRepository := repositories.NewUserRepository(db)
-	authService := services.NewAuthService(userRepository)
+	authService := services.NewAuthService(userRepository, tokenService)
 	authHandler := handlers.NewAuthHandler(authService)
 
 	router := gin.Default()
 	router.POST("/api/v1/auth/register", authHandler.Register)
+	router.POST("/api/v1/auth/login", authHandler.Login)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

@@ -16,14 +16,19 @@ import (
 var (
 	ErrInvalidRegistration = errors.New("invalid registration details")
 	ErrEmailAlreadyExists  = errors.New("email already registered")
+	ErrInvalidCredentials  = errors.New("invalid credentials")
 )
 
 type AuthService struct {
-	users *repositories.UserRepository
+	users  *repositories.UserRepository
+	tokens *TokenService
 }
 
-func NewAuthService(users *repositories.UserRepository) *AuthService {
-	return &AuthService{users: users}
+func NewAuthService(users *repositories.UserRepository, tokens *TokenService) *AuthService {
+	return &AuthService{
+		users:  users,
+		tokens: tokens,
+	}
 }
 
 func (s *AuthService) Register(
@@ -80,5 +85,43 @@ func (s *AuthService) Register(
 		ID:          user.ID.String(),
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
+	}, nil
+}
+
+func (s *AuthService) Login(
+	ctx context.Context,
+	input LoginInput,
+) (*LoginResult, error) {
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+
+	if email == "" || input.Password == "" || len(input.Password) > 72 {
+		return nil, ErrInvalidCredentials
+	}
+
+	user, err := s.users.FindByEmail(ctx, email)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword(
+		[]byte(user.PasswordHash),
+		[]byte(input.Password),
+	); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	token, err := s.tokens.GenerateAccessToken(user.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("generate access token: %w", err)
+	}
+
+	return &LoginResult{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   900,
 	}, nil
 }
