@@ -9,6 +9,9 @@ import (
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/config"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/database"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/handlers"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/services"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,7 +36,12 @@ func main() {
 	}
 	defer sqlDB.Close()
 
+	userRepository := repositories.NewUserRepository(db)
+	authService := services.NewAuthService(userRepository)
+	authHandler := handlers.NewAuthHandler(authService)
+
 	router := gin.Default()
+	router.POST("/api/v1/auth/register", authHandler.Register)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
