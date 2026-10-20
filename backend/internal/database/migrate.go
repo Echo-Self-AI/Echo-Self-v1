@@ -11,6 +11,7 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.RefreshSession{},
+		&models.EmailVerification{},
 	); err != nil {
 		return fmt.Errorf("migrate database schema: %w", err)
 	}

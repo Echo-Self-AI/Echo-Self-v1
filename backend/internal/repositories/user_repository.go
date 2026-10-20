@@ -46,7 +46,7 @@ func (r *UserRepository) FindByEmail(
 	return &user, nil
 }
 
-func (r *UserRepository) FindById(
+func (r *UserRepository) FindByID(
 	ctx context.Context,
 	id string,
 ) (*models.User, error) {

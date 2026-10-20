@@ -8,14 +8,25 @@ import (
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/services"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
-	auth *services.AuthService
+	auth              *services.AuthService
+	emailVerification *services.EmailVerificationService
+	isDevelopment     bool
 }
 
-func NewAuthHandler(auth *services.AuthService) *AuthHandler {
-	return &AuthHandler{auth: auth}
+func NewAuthHandler(
+	auth *services.AuthService,
+	emailVerification *services.EmailVerificationService,
+	isDevelopment bool,
+) *AuthHandler {
+	return &AuthHandler{
+		auth:              auth,
+		emailVerification: emailVerification,
+		isDevelopment:     isDevelopment,
+	}
 }
 
 type registerRequest struct {
@@ -35,6 +46,10 @@ type refreshRequest struct {
 
 type logoutRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type confirmEmailVerificationRequest struct {
+	Token string `json:"token" binding:"required"`
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -173,4 +188,83 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// Return the same response even if the token was already revoked
 	// or did not exist
 	c.Status(http.StatusNoContent)
+}
+
+func (h *AuthHandler) RequestEmailVerification(c *gin.Context) {
+	userID, err := uuid.Parse(c.GetString("userID"))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	token, err := h.emailVerification.CreateToken(ctx, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrEmailAlreadyVerified):
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "email already verified",
+			})
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(err, context.Canceled):
+			c.JSON(http.StatusRequestTimeout, gin.H{
+				"error": "request timed out",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "could not create verification token",
+			})
+		}
+		return
+	}
+
+	response := gin.H{
+		"message": "verification token created",
+	}
+
+	if h.isDevelopment {
+		response["verification_token"] = token
+	}
+
+	c.JSON(http.StatusCreated, response)
+}
+
+func (h *AuthHandler) ConfirmEmailVerification(c *gin.Context) {
+	var req confirmEmailVerificationRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	err := h.emailVerification.Verify(ctx, req.Token)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidVerificationToken):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid or expired verification token",
+			})
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(err, context.Canceled):
+			c.JSON(http.StatusRequestTimeout, gin.H{
+				"error": "request timed out",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "could not verify email",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "email verified successfully",
+	})
 }

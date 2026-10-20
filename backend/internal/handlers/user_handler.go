@@ -38,7 +38,7 @@ func (h *UserHandler) Me(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	user, err := h.users.FindById(ctx, id)
+	user, err := h.users.FindByID(ctx, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "could not retrieve user",

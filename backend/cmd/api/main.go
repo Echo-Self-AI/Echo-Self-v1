@@ -44,12 +44,28 @@ func main() {
 
 	userRepository := repositories.NewUserRepository(db)
 	refreshSessionRepository := repositories.NewRefreshSessionRepository(db)
+
+	emailVerificationRepository :=
+		repositories.NewEmailVerificationRepository(db)
+
 	authService := services.NewAuthService(
 		userRepository,
 		tokenService,
 		refreshSessionRepository,
 	)
-	authHandler := handlers.NewAuthHandler(authService)
+
+	emailVerificationService :=
+		services.NewEmailVerificationService(
+			userRepository,
+			emailVerificationRepository,
+		)
+
+	authHandler := handlers.NewAuthHandler(
+		authService,
+		emailVerificationService,
+		cfg.AppEnv == "development",
+	)
+
 	userHandler := handlers.NewUserHandler(userRepository)
 
 	router := gin.Default()
@@ -57,6 +73,15 @@ func main() {
 	router.POST("/api/v1/auth/login", authHandler.Login)
 	router.POST("/api/v1/auth/refresh", authHandler.Refresh)
 	router.POST("/api/v1/auth/logout", authHandler.Logout)
+	router.POST(
+		"/api/v1/auth/email-verification",
+		middleware.AuthRequired(tokenService),
+		authHandler.RequestEmailVerification,
+	)
+	router.POST(
+		"/api/v1/auth/email-verification/confirm",
+		authHandler.ConfirmEmailVerification,
+	)
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
 
