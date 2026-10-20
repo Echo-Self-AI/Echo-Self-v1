@@ -29,6 +29,14 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type logoutRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerRequest
 
@@ -109,4 +117,60 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req refreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "refresh_token is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	result, err := h.auth.Refresh(ctx, req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidCredentials) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid or expired refresh token",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not refresh session",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req logoutRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "refresh_token is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := h.auth.Logout(ctx, req.RefreshToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not logout",
+		})
+		return
+	}
+
+	// Return the same response even if the token was already revoked
+	// or did not exist
+	c.Status(http.StatusNoContent)
 }

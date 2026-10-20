@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -20,14 +22,20 @@ var (
 )
 
 type AuthService struct {
-	users  *repositories.UserRepository
-	tokens *TokenService
+	users    *repositories.UserRepository
+	tokens   *TokenService
+	sessions *repositories.RefreshSessionRepository
 }
 
-func NewAuthService(users *repositories.UserRepository, tokens *TokenService) *AuthService {
+func NewAuthService(
+	users *repositories.UserRepository,
+	tokens *TokenService,
+	sessions *repositories.RefreshSessionRepository,
+) *AuthService {
 	return &AuthService{
-		users:  users,
-		tokens: tokens,
+		users:    users,
+		tokens:   tokens,
+		sessions: sessions,
 	}
 }
 
@@ -119,9 +127,119 @@ func (s *AuthService) Login(
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
+	refreshToken, err := s.createRefreshSession(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &LoginResult{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   900,
+		AccessToken:  token,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    900,
 	}, nil
+}
+
+func (s *AuthService) createRefreshSession(
+	ctx context.Context,
+	userID uuid.UUID,
+) (string, error) {
+	rawToken, err := generateRefreshToken()
+	if err != nil {
+		return "", fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	session := &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    userID,
+		TokenHash: hashRefreshToken(rawToken),
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}
+
+	if err := s.sessions.Create(ctx, session); err != nil {
+		return "", fmt.Errorf("create refresh session: %w", err)
+	}
+
+	return rawToken, nil
+}
+
+func (s *AuthService) Refresh(
+	ctx context.Context,
+	rawToken string,
+) (*LoginResult, error) {
+	if rawToken == "" || len(rawToken) != 64 {
+		return nil, ErrInvalidCredentials
+	}
+
+	// Find the user associated with the current token.
+	// We use a repository lookup for the session in the next section.
+	session, err := s.findRefreshSession(ctx, hashRefreshToken(rawToken))
+	if err != nil {
+		return nil, err
+	}
+
+	if session == nil || session.RevokedAt != nil ||
+		!session.ExpiresAt.After(time.Now()) {
+		return nil, ErrInvalidCredentials
+	}
+
+	newRawToken, err := generateRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+
+	newSession := &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    session.UserID,
+		TokenHash: hashRefreshToken(newRawToken),
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}
+
+	if err := s.sessions.Rotate(
+		ctx,
+		hashRefreshToken(rawToken),
+		newSession,
+		time.Now(),
+	); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	accessToken, err := s.tokens.GenerateAccessToken(session.UserID.String())
+	if err != nil {
+		return nil, fmt.Errorf("generate access token: %w", err)
+	}
+
+	return &LoginResult{
+		AccessToken:  accessToken,
+		RefreshToken: newRawToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    900,
+	}, nil
+}
+
+func (s *AuthService) Logout(
+	ctx context.Context,
+	rawToken string,
+) error {
+	if rawToken == "" || len(rawToken) != 64 {
+		return nil
+	}
+
+	return s.sessions.Revoke(
+		ctx,
+		hashRefreshToken(rawToken),
+		time.Now(),
+	)
+}
+
+func (s *AuthService) findRefreshSession(
+	ctx context.Context,
+	tokenHash string,
+) (*models.RefreshSession, error) {
+	session, err := s.sessions.FindByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return nil, fmt.Errorf("find refresh session: %w", err)
+	}
+
+	return session, nil
 }

@@ -43,13 +43,20 @@ func main() {
 	}
 
 	userRepository := repositories.NewUserRepository(db)
-	authService := services.NewAuthService(userRepository, tokenService)
+	refreshSessionRepository := repositories.NewRefreshSessionRepository(db)
+	authService := services.NewAuthService(
+		userRepository,
+		tokenService,
+		refreshSessionRepository,
+	)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userRepository)
 
 	router := gin.Default()
 	router.POST("/api/v1/auth/register", authHandler.Register)
 	router.POST("/api/v1/auth/login", authHandler.Login)
+	router.POST("/api/v1/auth/refresh", authHandler.Refresh)
+	router.POST("/api/v1/auth/logout", authHandler.Logout)
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
 
