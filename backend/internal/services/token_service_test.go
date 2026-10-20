@@ -66,7 +66,7 @@ func TestParseAccessTokenRejectsWrongSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := other.ParseAccessToken(token); err != nil {
+	if _, err := other.ParseAccessToken(token); err == nil {
 		t.Fatal("expected token signed with another secret to be rejected")
 	}
 }
