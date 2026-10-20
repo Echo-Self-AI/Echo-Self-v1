@@ -44,9 +44,8 @@ func main() {
 
 	userRepository := repositories.NewUserRepository(db)
 	refreshSessionRepository := repositories.NewRefreshSessionRepository(db)
-
-	emailVerificationRepository :=
-		repositories.NewEmailVerificationRepository(db)
+	emailVerificationRepository := repositories.NewEmailVerificationRepository(db)
+	passwordResetRepository := repositories.NewPasswordResetRepository(db)
 
 	authService := services.NewAuthService(
 		userRepository,
@@ -60,9 +59,15 @@ func main() {
 			emailVerificationRepository,
 		)
 
+	passwordResetService := services.NewPasswordResetService(
+		userRepository,
+		passwordResetRepository,
+	)
+
 	authHandler := handlers.NewAuthHandler(
 		authService,
 		emailVerificationService,
+		passwordResetService,
 		cfg.AppEnv == "development",
 	)
 
@@ -81,6 +86,15 @@ func main() {
 	router.POST(
 		"/api/v1/auth/email-verification/confirm",
 		authHandler.ConfirmEmailVerification,
+	)
+	router.POST(
+		"/api/v1/auth/password-reset/request",
+		authHandler.RequestPasswordReset,
+	)
+
+	router.POST(
+		"/api/v1/auth/password-reset/confirm",
+		authHandler.ConfirmPasswordReset,
 	)
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)

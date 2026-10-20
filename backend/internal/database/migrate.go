@@ -12,6 +12,7 @@ func Migrate(db *gorm.DB) error {
 		&models.User{},
 		&models.RefreshSession{},
 		&models.EmailVerification{},
+		&models.PasswordReset{},
 	); err != nil {
 		return fmt.Errorf("migrate database schema: %w", err)
 	}

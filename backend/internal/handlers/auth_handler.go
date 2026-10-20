@@ -14,17 +14,20 @@ import (
 type AuthHandler struct {
 	auth              *services.AuthService
 	emailVerification *services.EmailVerificationService
+	passwordReset     *services.PasswordResetService
 	isDevelopment     bool
 }
 
 func NewAuthHandler(
 	auth *services.AuthService,
 	emailVerification *services.EmailVerificationService,
+	passwordReset *services.PasswordResetService,
 	isDevelopment bool,
 ) *AuthHandler {
 	return &AuthHandler{
 		auth:              auth,
 		emailVerification: emailVerification,
+		passwordReset:     passwordReset,
 		isDevelopment:     isDevelopment,
 	}
 }
@@ -50,6 +53,15 @@ type logoutRequest struct {
 
 type confirmEmailVerificationRequest struct {
 	Token string `json:"token" binding:"required"`
+}
+
+type passwordResetRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type passwordResetConfirmRequest struct {
+	Token       string `json:"token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required"`
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -266,5 +278,79 @@ func (h *AuthHandler) ConfirmEmailVerification(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "email verified successfully",
+	})
+}
+
+func (h *AuthHandler) RequestPasswordReset(c *gin.Context) {
+	var req passwordResetRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	token, err := h.passwordReset.CreateToken(ctx, req.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not process password reset request",
+		})
+		return
+	}
+
+	response := gin.H{
+		"message": "if the account exists, password reset instructions will be sent",
+	}
+
+	if h.isDevelopment && token != "" {
+		response["reset_token"] = token
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *AuthHandler) ConfirmPasswordReset(c *gin.Context) {
+	var req passwordResetConfirmRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	err := h.passwordReset.ResetPassword(ctx, req.Token, req.NewPassword)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidPasswordResetToken):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid or expired reset token",
+			})
+		case errors.Is(err, services.ErrInvalidNewPassword):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "password must be between 8 and 72 bytes",
+			})
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(err, context.Canceled):
+			c.JSON(http.StatusRequestTimeout, gin.H{
+				"error": "request timed out",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "could not reset password",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "password reset successfully; please log in again",
 	})
 }
