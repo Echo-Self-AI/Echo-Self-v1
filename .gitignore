@@ -1,0 +1,23 @@
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node and Expo
+node_modules/
+.expo/
+dist/
+
+# Go build artifacts
+backend/bin/
+backend/tmp/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
