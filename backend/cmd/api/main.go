@@ -13,6 +13,7 @@ import (
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/handlers"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/middleware"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/server"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -36,7 +37,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("database handle failed: %v", err)
 	}
-	defer sqlDB.Close()
 
 	tokenService, err := services.NewTokenService(cfg.JWTSecret)
 	if err != nil {
@@ -129,13 +129,56 @@ func main() {
 		})
 	})
 
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              ":" + cfg.AppPort,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("server failed: %v", err)
+	serveErr := make(chan error, 1)
+
+	go func() {
+		logger.Info("starting HTTP server", "address", httpServer.Addr)
+
+		if err := httpServer.ListenAndServe(); err != nil &&
+			!errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+
+		serveErr <- nil
+	}()
+
+	signals := server.NotifyShutdown()
+
+	select {
+	case sig := <-signals:
+		logger.Info("shutdown signal received", "signal", sig.String())
+
+	case err := <-serveErr:
+		if err != nil {
+			logger.Error("HTTP server failed", "error", err)
+		}
+
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			logger.Error("database connection pool close failed", "error", closeErr)
+		}
+
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx, httpServer); err != nil {
+		logger.Error("graceful shutdown failed", "error", err)
+	} else {
+		logger.Info("HTTP server stopped gracefully")
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		logger.Error("database connection pool close failed", "error", err)
+	} else {
+		logger.Info("database connection pool closed")
 	}
 }
