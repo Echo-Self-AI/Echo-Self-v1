@@ -76,28 +76,56 @@ func main() {
 	router := gin.Default()
 	router.Use(middleware.RateLimit())
 
-	router.POST("/api/v1/auth/register", authHandler.Register)
-	router.POST("/api/v1/auth/login", authHandler.Login)
-	router.POST("/api/v1/auth/refresh", authHandler.Refresh)
-	router.POST("/api/v1/auth/logout", authHandler.Logout)
-	router.POST(
-		"/api/v1/auth/email-verification",
-		middleware.AuthRequired(tokenService),
-		authHandler.RequestEmailVerification,
-	)
-	router.POST(
-		"/api/v1/auth/email-verification/confirm",
-		authHandler.ConfirmEmailVerification,
-	)
-	router.POST(
-		"/api/v1/auth/password-reset/request",
-		authHandler.RequestPasswordReset,
-	)
+	authGroup := router.Group("/api/v1/auth")
+	{
+		authGroup.POST(
+			"/register",
+			middleware.RateLimitWithConfig(1.0/60.0, 3),
+			authHandler.Register,
+		)
 
-	router.POST(
-		"/api/v1/auth/password-reset/confirm",
-		authHandler.ConfirmPasswordReset,
-	)
+		authGroup.POST(
+			"/login",
+			middleware.RateLimitWithConfig(1.0/60.0, 5),
+			authHandler.Login,
+		)
+
+		authGroup.POST(
+			"/refresh",
+			middleware.RateLimitWithConfig(1.0, 10),
+			authHandler.Refresh,
+		)
+
+		authGroup.POST(
+			"/logout",
+			authHandler.Logout,
+		)
+
+		authGroup.POST(
+			"/email-verification",
+			middleware.RateLimitWithConfig(1.0/60.0, 3),
+			middleware.AuthRequired(tokenService),
+			authHandler.RequestEmailVerification,
+		)
+
+		authGroup.POST(
+			"/email-verification/confirm",
+			middleware.RateLimitWithConfig(1.0/60.0, 5),
+			authHandler.ConfirmEmailVerification,
+		)
+
+		authGroup.POST(
+			"/password-reset/request",
+			middleware.RateLimitWithConfig(1.0/60.0, 3),
+			authHandler.RequestPasswordReset,
+		)
+
+		authGroup.POST(
+			"/password-reset/confirm",
+			middleware.RateLimitWithConfig(1.0/60.0, 5),
+			authHandler.ConfirmPasswordReset,
+		)
+	}
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
 

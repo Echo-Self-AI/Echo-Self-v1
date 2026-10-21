@@ -25,14 +25,18 @@ func newRateLimiterStore() *rateLimiterStore {
 	}
 }
 
-func (s *rateLimiterStore) getLimiter(key string) *rate.Limiter {
+func (s *rateLimiterStore) getLimiter(
+	key string,
+	requestsPerSecond rate.Limit,
+	burst int,
+) *rate.Limiter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	client, exists := s.clients[key]
 	if !exists {
 		client = &clientLimiter{
-			limiter: rate.NewLimiter(10, 20),
+			limiter: rate.NewLimiter(requestsPerSecond, burst),
 		}
 		s.clients[key] = client
 	}
@@ -41,7 +45,16 @@ func (s *rateLimiterStore) getLimiter(key string) *rate.Limiter {
 	return client.limiter
 }
 
+// RateLimit allows 10 requests per second, with a burst of 20.
 func RateLimit() gin.HandlerFunc {
+	return RateLimitWithConfig(rate.Limit(10), 20)
+}
+
+// RateLimitWithConfig creates a per-IP rate limiter.
+func RateLimitWithConfig(
+	requestsPerSecond rate.Limit,
+	burst int,
+) gin.HandlerFunc {
 	store := newRateLimiterStore()
 
 	go func() {
@@ -62,8 +75,11 @@ func RateLimit() gin.HandlerFunc {
 	}()
 
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		limiter := store.getLimiter(ip)
+		limiter := store.getLimiter(
+			c.ClientIP(),
+			requestsPerSecond,
+			burst,
+		)
 
 		if !limiter.Allow() {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
