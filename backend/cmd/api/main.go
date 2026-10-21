@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -73,11 +74,17 @@ func main() {
 
 	userHandler := handlers.NewUserHandler(userRepository)
 
-	router := gin.Default()
+	router := gin.New()
 
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("trusted proxy configuration failed: %v", err)
 	}
+
+	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
+
+	router.Use(gin.Recovery())
+	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestLogger(logger))
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.RequestSizeLimit(middleware.MaxRequestBodySize))
 	router.Use(middleware.RateLimit())
