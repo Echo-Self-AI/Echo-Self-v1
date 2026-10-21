@@ -20,6 +20,11 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("configuration validation failed: %v", err)
+	}
+
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
