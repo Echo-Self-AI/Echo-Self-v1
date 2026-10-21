@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
@@ -103,5 +104,34 @@ func TestRateLimitIgnoresSpoofedForwardedIP(t *testing.T) {
 	if secondStatus != http.StatusTooManyRequests {
 		t.Fatalf("second request should share the same client IP limit: expected %d, got %d",
 			http.StatusTooManyRequests, secondStatus)
+	}
+}
+
+func TestRateLimiterStoreCleansUpStaleClients(t *testing.T) {
+	store := newRateLimiterStore()
+
+	// Insert a client that was last seen 11 minutes ago.
+	staleLimiter := &clientLimiter{
+		limiter:  rate.NewLimiter(1, 1),
+		lastSeen: time.Now().Add(-11 * time.Minute),
+	}
+
+	store.clients["192.0.2.40"] = staleLimiter
+
+	// Force the cleanup check to run.
+	store.lastCleanup = time.Now().Add(-2 * time.Minute)
+
+	// Access another client to trigger cleanup.
+	store.getLimiter("192.0.2.41", rate.Limit(1), 1)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if _, exists := store.clients["192.0.2.40"]; exists {
+		t.Fatal("expected stale client to be removed")
+	}
+
+	if _, exists := store.clients["192.0.2.41"]; !exists {
+		t.Fatal("expected active client to remain in the store")
 	}
 }

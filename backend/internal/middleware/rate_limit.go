@@ -9,14 +9,20 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	rateLimitClientTTL       = 10 * time.Minute
+	rateLimitCleanupInterval = time.Minute
+)
+
 type clientLimiter struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
 }
 
 type rateLimiterStore struct {
-	mu      sync.Mutex
-	clients map[string]*clientLimiter
+	mu          sync.Mutex
+	clients     map[string]*clientLimiter
+	lastCleanup time.Time
 }
 
 func newRateLimiterStore() *rateLimiterStore {
@@ -30,8 +36,29 @@ func (s *rateLimiterStore) getLimiter(
 	requestsPerSecond rate.Limit,
 	burst int,
 ) *rate.Limiter {
+	now := time.Now()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.clients == nil {
+		s.clients = make(map[string]*clientLimiter)
+	}
+
+	// Perform cleanup during requests instead of starting a
+	// background goroutine for every middleware instance.
+	if s.lastCleanup.IsZero() ||
+		now.Sub(s.lastCleanup) >= rateLimitCleanupInterval {
+		cutoff := now.Add(-rateLimitClientTTL)
+
+		for clientIP, client := range s.clients {
+			if client.lastSeen.Before(cutoff) {
+				delete(s.clients, clientIP)
+			}
+		}
+
+		s.lastCleanup = now
+	}
 
 	client, exists := s.clients[key]
 	if !exists {
@@ -41,7 +68,7 @@ func (s *rateLimiterStore) getLimiter(
 		s.clients[key] = client
 	}
 
-	client.lastSeen = time.Now()
+	client.lastSeen = now
 	return client.limiter
 }
 
@@ -56,23 +83,6 @@ func RateLimitWithConfig(
 	burst int,
 ) gin.HandlerFunc {
 	store := newRateLimiterStore()
-
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			cutoff := time.Now().Add(-10 * time.Minute)
-
-			store.mu.Lock()
-			for ip, client := range store.clients {
-				if client.lastSeen.Before(cutoff) {
-					delete(store.clients, ip)
-				}
-			}
-			store.mu.Unlock()
-		}
-	}()
 
 	return func(c *gin.Context) {
 		limiter := store.getLimiter(
