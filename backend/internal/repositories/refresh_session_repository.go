@@ -51,7 +51,7 @@ func (r *RefreshSessionRepository) Rotate(
 
 		// consume the old token and create the replacement atomically
 		if err := tx.Model(&current).Update("revoked_at", now).Error; err != nil {
-			return nil
+			return err
 		}
 
 		return tx.Create(newSession).Error
