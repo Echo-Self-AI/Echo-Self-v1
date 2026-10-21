@@ -98,41 +98,13 @@ func main() {
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
 
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"service": "echoself-api",
-			"env":     cfg.AppEnv,
-		})
-	})
+	healthHandler := handlers.NewHealthHandler(db)
 
-	router.GET("/api/v1/health/db", func(c *gin.Context) {
-		sqlDB, err := db.DB()
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "unavailable",
-			})
-			return
-		}
+	router.GET("/health", healthHandler.Liveness)
+	router.GET("/ready", healthHandler.Readiness)
 
-		ctx, cancel := context.WithTimeout(
-			c.Request.Context(),
-			3*time.Second,
-		)
-		defer cancel()
-
-		if err := sqlDB.PingContext(ctx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "unavailable",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":   "ok",
-			"database": "connected",
-		})
-	})
+	// Keep the existing database health endpoint for compatibility.
+	router.GET("/api/v1/health/db", healthHandler.Readiness)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.AppPort,
