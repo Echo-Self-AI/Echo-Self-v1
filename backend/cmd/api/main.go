@@ -80,56 +80,7 @@ func main() {
 	}
 	router.Use(middleware.RateLimit())
 
-	authGroup := router.Group("/api/v1/auth")
-	{
-		authGroup.POST(
-			"/register",
-			middleware.RateLimitWithConfig(1.0/60.0, 3),
-			authHandler.Register,
-		)
-
-		authGroup.POST(
-			"/login",
-			middleware.RateLimitWithConfig(1.0/60.0, 5),
-			authHandler.Login,
-		)
-
-		authGroup.POST(
-			"/refresh",
-			middleware.RateLimitWithConfig(1.0, 10),
-			authHandler.Refresh,
-		)
-
-		authGroup.POST(
-			"/logout",
-			authHandler.Logout,
-		)
-
-		authGroup.POST(
-			"/email-verification",
-			middleware.RateLimitWithConfig(1.0/60.0, 3),
-			middleware.AuthRequired(tokenService),
-			authHandler.RequestEmailVerification,
-		)
-
-		authGroup.POST(
-			"/email-verification/confirm",
-			middleware.RateLimitWithConfig(1.0/60.0, 5),
-			authHandler.ConfirmEmailVerification,
-		)
-
-		authGroup.POST(
-			"/password-reset/request",
-			middleware.RateLimitWithConfig(1.0/60.0, 3),
-			authHandler.RequestPasswordReset,
-		)
-
-		authGroup.POST(
-			"/password-reset/confirm",
-			middleware.RateLimitWithConfig(1.0/60.0, 5),
-			authHandler.ConfirmPasswordReset,
-		)
-	}
+	handlers.RegisterAuthRoutes(router, authHandler, tokenService)
 
 	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
 
