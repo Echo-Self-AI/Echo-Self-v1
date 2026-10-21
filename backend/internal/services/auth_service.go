@@ -171,8 +171,6 @@ func (s *AuthService) Refresh(
 		return nil, ErrInvalidCredentials
 	}
 
-	// Find the user associated with the current token.
-	// We use a repository lookup for the session in the next section.
 	session, err := s.findRefreshSession(ctx, hashRefreshToken(rawToken))
 	if err != nil {
 		return nil, err
@@ -183,30 +181,32 @@ func (s *AuthService) Refresh(
 		return nil, ErrInvalidCredentials
 	}
 
-	newRawToken, err := generateRefreshToken()
+	// Generate both tokens before consuming the current refresh token.
+	accessToken, err := s.tokens.GenerateAccessToken(session.UserID.String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
+	newRawToken, err := generateRefreshToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	now := time.Now()
 	newSession := &models.RefreshSession{
 		ID:        uuid.New(),
 		UserID:    session.UserID,
 		TokenHash: hashRefreshToken(newRawToken),
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt: now.Add(30 * 24 * time.Hour),
 	}
 
 	if err := s.sessions.Rotate(
 		ctx,
 		hashRefreshToken(rawToken),
 		newSession,
-		time.Now(),
+		now,
 	); err != nil {
 		return nil, ErrInvalidCredentials
-	}
-
-	accessToken, err := s.tokens.GenerateAccessToken(session.UserID.String())
-	if err != nil {
-		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
 	return &LoginResult{
