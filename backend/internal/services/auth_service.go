@@ -13,6 +13,7 @@ import (
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var (
@@ -206,7 +207,11 @@ func (s *AuthService) Refresh(
 		newSession,
 		now,
 	); err != nil {
-		return nil, ErrInvalidCredentials
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidCredentials
+		}
+
+		return nil, fmt.Errorf("rotate refresh session: %w", err)
 	}
 
 	return &LoginResult{
