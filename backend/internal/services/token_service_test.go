@@ -101,3 +101,76 @@ func TestNewTokenServiceRejectsShortSecret(t *testing.T) {
 		t.Fatal("expected short secret to be rejected")
 	}
 }
+
+func TestParseAccessTokenRejectsMissingExpiration(t *testing.T) {
+	service, err := NewTokenService(testJWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, AccessClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:  "user-123",
+			IssuedAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		},
+	})
+
+	signed, err := token.SignedString([]byte(testJWTSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.ParseAccessToken(signed); err == nil {
+		t.Fatal("expected token without expiration to be rejected")
+	}
+}
+
+func TestParseAccessTokenRejectsFutureIssuedAt(t *testing.T) {
+	service, err := NewTokenService(testJWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, AccessClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "user-123",
+			IssuedAt:  jwt.NewNumericDate(now.Add(10 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(20 * time.Minute)),
+		},
+	})
+
+	signed, err := token.SignedString([]byte(testJWTSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.ParseAccessToken(signed); err == nil {
+		t.Fatal("expected token issued in the future to be rejected")
+	}
+}
+
+func TestParseAccessTokenRejectsNoneAlgorithm(t *testing.T) {
+	service, err := NewTokenService(testJWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodNone, AccessClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "user-123",
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	})
+
+	signed, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.ParseAccessToken(signed); err == nil {
+		t.Fatal("expected unsigned token to be rejected")
+	}
+}
