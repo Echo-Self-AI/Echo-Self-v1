@@ -78,6 +78,7 @@ func main() {
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("trusted proxy configuration failed: %v", err)
 	}
+	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.RateLimit())
 
 	handlers.RegisterAuthRoutes(router, authHandler, tokenService)
