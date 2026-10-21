@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,6 +68,26 @@ func TestRateLimitWithConfigBlocksAfterBurst(t *testing.T) {
 	if recorder.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected status %d after burst, got %d",
 			http.StatusTooManyRequests, recorder.Code)
+	}
+
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if body.Error.Code != "RATE_LIMIT_EXCEEDED" {
+		t.Errorf("expected error code RATE_LIMIT_EXCEEDED, got %q",
+			body.Error.Code)
+	}
+
+	if body.Error.Message == "" {
+		t.Error("expected a non-empty error message")
 	}
 }
 

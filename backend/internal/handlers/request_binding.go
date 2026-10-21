@@ -11,15 +11,21 @@ func bindJSON(c *gin.Context, destination any) bool {
 	if err := c.ShouldBindJSON(destination); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error": "request body too large",
-			})
+			respondError(
+				c,
+				http.StatusRequestEntityTooLarge,
+				"REQUEST_BODY_TOO_LARGE",
+				"Request body exceeds the allowed size",
+			)
 			return false
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid request body",
-		})
+		respondError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_REQUEST_BODY",
+			"The request body is invalid",
+		)
 		return false
 	}
 

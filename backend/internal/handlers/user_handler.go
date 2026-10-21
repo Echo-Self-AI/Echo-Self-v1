@@ -21,17 +21,23 @@ func NewUserHandler(users *repositories.UserRepository) *UserHandler {
 func (h *UserHandler) Me(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "unauthenticated",
-		})
+		respondError(
+			c,
+			http.StatusUnauthorized,
+			"UNAUTHENTICATED",
+			"Authentication is required",
+		)
 		return
 	}
 
 	id, ok := userID.(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "invalid authentication context",
-		})
+		respondError(
+			c,
+			http.StatusUnauthorized,
+			"INVALID_AUTH_CONTEXT",
+			"Invalid authentication context",
+		)
 		return
 	}
 
@@ -40,16 +46,17 @@ func (h *UserHandler) Me(c *gin.Context) {
 
 	user, err := h.users.FindByID(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "could not retrieve user",
-		})
+		respondInternalError(c, "Could not retrieve user")
 		return
 	}
 
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "user no longer exists",
-		})
+		respondError(
+			c,
+			http.StatusUnauthorized,
+			"USER_NOT_FOUND",
+			"User no longer exists",
+		)
 		return
 	}
 

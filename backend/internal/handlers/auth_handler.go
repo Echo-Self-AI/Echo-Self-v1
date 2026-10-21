@@ -82,21 +82,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidRegistration):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid registration details",
-			})
+			respondError(c, http.StatusBadRequest,
+				"INVALID_REGISTRATION", "Invalid registration details")
 		case errors.Is(err, services.ErrEmailAlreadyExists):
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "email already registered",
-			})
-		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-			c.JSON(http.StatusRequestTimeout, gin.H{
-				"error": "request timed out",
-			})
+			respondError(c, http.StatusConflict,
+				"EMAIL_ALREADY_EXISTS", "Email already registered")
+		case errors.Is(err, context.DeadlineExceeded),
+			errors.Is(err, context.Canceled):
+			respondRequestTimeout(c)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "could not register user",
-			})
+			respondInternalError(c, "Could not register user")
 		}
 		return
 	}
@@ -121,18 +116,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidCredentials):
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid email or password",
-			})
+			respondError(c, http.StatusUnauthorized,
+				"INVALID_CREDENTIALS", "Invalid email or password")
 		case errors.Is(err, context.DeadlineExceeded),
 			errors.Is(err, context.Canceled):
-			c.JSON(http.StatusRequestTimeout, gin.H{
-				"error": "request timed out",
-			})
+			respondRequestTimeout(c)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "login failed",
-			})
+			respondInternalError(c, "Login failed")
 		}
 		return
 	}
@@ -153,15 +143,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	result, err := h.auth.Refresh(ctx, req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, services.ErrInvalidCredentials) {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid or expired refresh token",
-			})
+			respondError(c, http.StatusUnauthorized,
+				"INVALID_REFRESH_TOKEN", "Invalid or expired refresh token")
 			return
 		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "could not refresh session",
-		})
+		respondInternalError(c, "Could not refresh session")
 		return
 	}
 
@@ -179,9 +166,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	defer cancel()
 
 	if err := h.auth.Logout(ctx, req.RefreshToken); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "could not logout",
-		})
+		respondInternalError(c, "Could not logout")
 		return
 	}
 
@@ -193,7 +178,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) RequestEmailVerification(c *gin.Context) {
 	userID, err := uuid.Parse(c.GetString("userID"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized")
 		return
 	}
 
@@ -204,18 +189,13 @@ func (h *AuthHandler) RequestEmailVerification(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrEmailAlreadyVerified):
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "email already verified",
-			})
+			respondError(c, http.StatusConflict,
+				"EMAIL_ALREADY_VERIFIED", "Email already verified")
 		case errors.Is(err, context.DeadlineExceeded),
 			errors.Is(err, context.Canceled):
-			c.JSON(http.StatusRequestTimeout, gin.H{
-				"error": "request timed out",
-			})
+			respondRequestTimeout(c)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "could not create verification token",
-			})
+			respondInternalError(c, "Could not create verification token")
 		}
 		return
 	}
@@ -245,18 +225,13 @@ func (h *AuthHandler) ConfirmEmailVerification(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidVerificationToken):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid or expired verification token",
-			})
+			respondError(c, http.StatusBadRequest,
+				"INVALID_VERIFICATION_TOKEN", "Invalid or expired verification token")
 		case errors.Is(err, context.DeadlineExceeded),
 			errors.Is(err, context.Canceled):
-			c.JSON(http.StatusRequestTimeout, gin.H{
-				"error": "request timed out",
-			})
+			respondRequestTimeout(c)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "could not verify email",
-			})
+			respondInternalError(c, "Could not verify email")
 		}
 		return
 	}
@@ -278,9 +253,7 @@ func (h *AuthHandler) RequestPasswordReset(c *gin.Context) {
 
 	token, err := h.passwordReset.CreateToken(ctx, req.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "could not process password reset request",
-		})
+		respondInternalError(c, "Could not process password reset request")
 		return
 	}
 
@@ -309,22 +282,16 @@ func (h *AuthHandler) ConfirmPasswordReset(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidPasswordResetToken):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid or expired reset token",
-			})
+			respondError(c, http.StatusBadRequest,
+				"INVALID_PASSWORD_RESET_TOKEN", "Invalid or expired reset token")
 		case errors.Is(err, services.ErrInvalidNewPassword):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "password must be between 8 and 72 bytes",
-			})
+			respondError(c, http.StatusBadRequest,
+				"INVALID_NEW_PASSWORD", "Password must be between 8 and 72 bytes")
 		case errors.Is(err, context.DeadlineExceeded),
 			errors.Is(err, context.Canceled):
-			c.JSON(http.StatusRequestTimeout, gin.H{
-				"error": "request timed out",
-			})
+			respondRequestTimeout(c)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "could not reset password",
-			})
+			respondInternalError(c, "Could not reset password")
 		}
 		return
 	}

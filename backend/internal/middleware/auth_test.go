@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -33,6 +34,34 @@ func TestAuthRequired(t *testing.T) {
 		},
 	)
 
+	assertErrorResponse := func(
+		t *testing.T,
+		rec *httptest.ResponseRecorder,
+		expectedCode string,
+	) {
+		t.Helper()
+
+		var body struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to decode error response: %v", err)
+		}
+
+		if body.Error.Code != expectedCode {
+			t.Errorf("expected error code %q, got %q",
+				expectedCode, body.Error.Code)
+		}
+
+		if body.Error.Message == "" {
+			t.Error("expected a non-empty error message")
+		}
+	}
+
 	t.Run("rejects missing token", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 		rec := httptest.NewRecorder()
@@ -42,6 +71,8 @@ func TestAuthRequired(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d", rec.Code)
 		}
+
+		assertErrorResponse(t, rec, "UNAUTHORIZED")
 	})
 
 	t.Run("accepts valid token", func(t *testing.T) {
@@ -71,5 +102,7 @@ func TestAuthRequired(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d", rec.Code)
 		}
+
+		assertErrorResponse(t, rec, "INVALID_ACCESS_TOKEN")
 	})
 }

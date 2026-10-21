@@ -92,9 +92,12 @@ func RateLimitWithConfig(
 		)
 
 		if !limiter.Allow() {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "too many requests; please try again later",
-			})
+			respondMiddlewareError(
+				c,
+				http.StatusTooManyRequests,
+				"RATE_LIMIT_EXCEEDED",
+				"Too many requests; please try again later",
+			)
 			return
 		}
 
