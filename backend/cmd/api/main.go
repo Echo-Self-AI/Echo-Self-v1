@@ -74,6 +74,10 @@ func main() {
 	userHandler := handlers.NewUserHandler(userRepository)
 
 	router := gin.Default()
+
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Fatalf("trusted proxy configuration failed: %v", err)
+	}
 	router.Use(middleware.RateLimit())
 
 	authGroup := router.Group("/api/v1/auth")

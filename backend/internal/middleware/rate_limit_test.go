@@ -68,3 +68,40 @@ func TestRateLimitWithConfigBlocksAfterBurst(t *testing.T) {
 			http.StatusTooManyRequests, recorder.Code)
 	}
 }
+
+func TestRateLimitIgnoresSpoofedForwardedIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	if err := router.SetTrustedProxies(nil); err != nil {
+		t.Fatalf("failed to configure trusted proxies: %v", err)
+	}
+
+	router.Use(RateLimitWithConfig(0.001, 1))
+	router.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	makeRequest := func(forwardedIP string) int {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.RemoteAddr = "192.0.2.30:12345"
+		req.Header.Set("X-Forwarded-For", forwardedIP)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder.Code
+	}
+
+	firstStatus := makeRequest("203.0.113.10")
+	if firstStatus != http.StatusOK {
+		t.Fatalf("first request: expected %d, got %d",
+			http.StatusOK, firstStatus)
+	}
+
+	secondStatus := makeRequest("203.0.113.20")
+	if secondStatus != http.StatusTooManyRequests {
+		t.Fatalf("second request should share the same client IP limit: expected %d, got %d",
+			http.StatusTooManyRequests, secondStatus)
+	}
+}
