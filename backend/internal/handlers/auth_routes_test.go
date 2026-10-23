@@ -43,6 +43,30 @@ func TestAuthRouteRateLimit(t *testing.T) {
 				l.passwordResetRequest.requestsPerSecond = rate.Limit(0)
 			},
 		},
+		{
+			name:  "refresh",
+			path:  "/api/v1/auth/refresh",
+			burst: 10,
+			setLimit: func(l *authRateLimits) {
+				l.refresh.requestsPerSecond = rate.Limit(0)
+			},
+		},
+		{
+			name:  "email verification confirmation",
+			path:  "/api/v1/auth/email-verification/confirm",
+			burst: 5,
+			setLimit: func(l *authRateLimits) {
+				l.emailVerificationConfirm.requestsPerSecond = rate.Limit(0)
+			},
+		},
+		{
+			name:  "password reset confirmation",
+			path:  "/api/v1/auth/password-reset/confirm",
+			burst: 5,
+			setLimit: func(l *authRateLimits) {
+				l.passwordResetConfirm.requestsPerSecond = rate.Limit(0)
+			},
+		},
 	}
 
 	for _, tt := range tests {
