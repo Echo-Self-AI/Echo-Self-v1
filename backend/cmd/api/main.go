@@ -80,6 +80,10 @@ func main() {
 	userService := services.NewUserService(userRepository)
 	userHandler := handlers.NewUserHandler(userService)
 
+	consentRepository := repositories.NewConsentRepository(db)
+	consentService := services.NewConsentService(consentRepository)
+	consentHandler := handlers.NewConsentHandler(consentService)
+
 	router := gin.New()
 
 	if err := router.SetTrustedProxies(nil); err != nil {
@@ -102,6 +106,15 @@ func main() {
 		usersGroup.GET("/me", userHandler.Me)
 		usersGroup.PATCH("/me", userHandler.UpdateProfile)
 		usersGroup.DELETE("/me", userHandler.DeleteAccount)
+	}
+
+	consentsGroup := router.Group("/api/v1/consents", middleware.AuthRequired(tokenService))
+	{
+		consentsGroup.POST("", consentHandler.Grant)
+		consentsGroup.GET("", consentHandler.List)
+		consentsGroup.GET("/:id", consentHandler.Get)
+		consentsGroup.POST("/:id/revoke", consentHandler.Revoke)
+		consentsGroup.GET("/:id/audit", consentHandler.AuditLogs)
 	}
 
 	healthHandler := handlers.NewHealthHandler(db)
