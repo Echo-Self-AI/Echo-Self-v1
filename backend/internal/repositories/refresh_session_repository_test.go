@@ -181,3 +181,54 @@ func TestRefreshSessionConcurrentRotationAllowsOnlyOneSuccess(t *testing.T) {
 		t.Fatalf("expected exactly one replacement session, got %d", replacementCount)
 	}
 }
+
+func TestRefreshSessionRevokePreventsRotation(t *testing.T) {
+	db := database.SetupTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	user := &models.User{
+		ID:           uuid.New(),
+		Email:        "logout-" + uuid.NewString() + "@example.com",
+		PasswordHash: "test-hash",
+		DisplayName:  "Logout Test",
+	}
+	if err := db.WithContext(ctx).Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	session := &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "logout-" + uuid.NewString(),
+		ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := db.WithContext(ctx).Create(session).Error; err != nil {
+		t.Fatalf("create refresh session: %v", err)
+	}
+
+	repository := NewRefreshSessionRepository(db)
+
+	if err := repository.Revoke(ctx, session.TokenHash, now); err != nil {
+		t.Fatalf("revoke refresh session: %v", err)
+	}
+
+	var revoked models.RefreshSession
+	if err := db.First(&revoked, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load revoked session: %v", err)
+	}
+	if revoked.RevokedAt == nil {
+		t.Fatal("expected refresh session to be revoked")
+	}
+
+	err := repository.Rotate(ctx, session.TokenHash, &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "replacement-" + uuid.NewString(),
+		ExpiresAt: now.Add(30 * 24 * time.Hour),
+	}, now)
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected revoked session rotation to be rejected, got %v", err)
+	}
+}
