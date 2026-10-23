@@ -9,7 +9,6 @@ import (
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/database"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 func TestPasswordResetUpdatesPasswordAndRevokesSessions(t *testing.T) {
@@ -90,6 +89,40 @@ func TestPasswordResetUpdatesPasswordAndRevokesSessions(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPasswordReset) {
 		t.Fatalf("expected token reuse to be rejected, got %v", err)
 	}
+}
 
-	_ = gorm.ErrRecordNotFound // remove this line if your editor reports it unused
+func TestPasswordResetRejectsExpiredToken(t *testing.T) {
+	db := database.SetupTestDB(t)
+
+	ctx := context.Background()
+	now := time.Now()
+
+	user := &models.User{
+		ID:           uuid.New(),
+		Email:        "reset-expired-" + uuid.NewString() + "@example.com",
+		PasswordHash: "current-hash",
+		DisplayName:  "Expired Reset Test",
+	}
+
+	if err := db.WithContext(ctx).Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	reset := &models.PasswordReset{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "reset-exp-" + uuid.NewString(),
+		ExpiresAt: now.Add(-10 * time.Minute), // expired in past
+	}
+
+	if err := db.WithContext(ctx).Create(reset).Error; err != nil {
+		t.Fatalf("create reset token: %v", err)
+	}
+
+	repository := NewPasswordResetRepository(db)
+
+	err := repository.ResetPassword(ctx, reset.TokenHash, now, "new-hash")
+	if !errors.Is(err, ErrInvalidPasswordReset) {
+		t.Fatalf("expected expired reset token to be rejected, got %v", err)
+	}
 }

@@ -68,3 +68,37 @@ func TestEmailVerificationConsumesTokenOnce(t *testing.T) {
 		t.Fatalf("expected token reuse to be rejected, got %v", err)
 	}
 }
+
+func TestEmailVerificationRejectsExpiredToken(t *testing.T) {
+	db := database.SetupTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	user := &models.User{
+		ID:              uuid.New(),
+		Email:           "verify-exp-" + uuid.NewString() + "@example.com",
+		PasswordHash:    "test-hash",
+		DisplayName:     "Verification Exp Test",
+		IsEmailVerified: false,
+	}
+	if err := db.WithContext(ctx).Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	verification := &models.EmailVerification{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "verify-exp-" + uuid.NewString(),
+		ExpiresAt: now.Add(-1 * time.Hour), // expired in past
+	}
+	if err := db.WithContext(ctx).Create(verification).Error; err != nil {
+		t.Fatalf("create verification token: %v", err)
+	}
+
+	repository := NewEmailVerificationRepository(db)
+
+	err := repository.VerifyAndConsume(ctx, verification.TokenHash, now)
+	if !errors.Is(err, ErrInvalidVerificationRecord) {
+		t.Fatalf("expected expired verification token to be rejected, got %v", err)
+	}
+}

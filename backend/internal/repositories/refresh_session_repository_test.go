@@ -232,3 +232,42 @@ func TestRefreshSessionRevokePreventsRotation(t *testing.T) {
 		t.Fatalf("expected revoked session rotation to be rejected, got %v", err)
 	}
 }
+
+func TestRefreshSessionRotationRejectsExpired(t *testing.T) {
+	db := database.SetupTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	user := &models.User{
+		ID:           uuid.New(),
+		Email:        "expired-session-" + uuid.NewString() + "@example.com",
+		PasswordHash: "test-hash",
+		DisplayName:  "Expired Session Test",
+	}
+	if err := db.WithContext(ctx).Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	session := &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "expired-" + uuid.NewString(),
+		ExpiresAt: now.Add(-1 * time.Hour), // expired in past
+	}
+	if err := db.WithContext(ctx).Create(session).Error; err != nil {
+		t.Fatalf("create refresh session: %v", err)
+	}
+
+	repository := NewRefreshSessionRepository(db)
+
+	err := repository.Rotate(ctx, session.TokenHash, &models.RefreshSession{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: "replacement-" + uuid.NewString(),
+		ExpiresAt: now.Add(30 * 24 * time.Hour),
+	}, now)
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected expired session rotation to be rejected, got %v", err)
+	}
+}

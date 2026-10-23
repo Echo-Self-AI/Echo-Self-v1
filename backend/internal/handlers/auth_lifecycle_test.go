@@ -222,3 +222,83 @@ func TestAuthLifecycleRegisterLoginRefreshLogout(t *testing.T) {
 			reuseRecorder.Body.String())
 	}
 }
+
+func TestAuthDuplicateRegistrationAndInvalidCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := database.SetupTestDB(t)
+
+	users := repositories.NewUserRepository(db)
+	sessions := repositories.NewRefreshSessionRepository(db)
+	verificationRepo := repositories.NewEmailVerificationRepository(db)
+	resetRepo := repositories.NewPasswordResetRepository(db)
+
+	tokenService, err := services.NewTokenService(
+		"test-secret-with-at-least-32-characters-long",
+	)
+	if err != nil {
+		t.Fatalf("create token service: %v", err)
+	}
+
+	authService := services.NewAuthService(users, tokenService, sessions)
+	verificationService := services.NewEmailVerificationService(users, verificationRepo)
+	resetService := services.NewPasswordResetService(users, resetRepo)
+
+	authHandler := NewAuthHandler(authService, verificationService, resetService, true)
+
+	router := gin.New()
+	RegisterAuthRoutes(router, authHandler, tokenService)
+
+	email := fmt.Sprintf("dup-%s@example.com", uuid.NewString())
+	password := "secure-password-123"
+
+	// 1. Initial registration succeeds
+	reg1 := performJSONRequest(t, router, http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"email":        email,
+		"password":     password,
+		"display_name": "First User",
+	})
+	if reg1.Code != http.StatusCreated {
+		t.Fatalf("initial register: expected %d, got %d", http.StatusCreated, reg1.Code)
+	}
+
+	// 2. Duplicate registration returns 409 Conflict with EMAIL_ALREADY_EXISTS
+	reg2 := performJSONRequest(t, router, http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"email":        email,
+		"password":     password,
+		"display_name": "Duplicate User",
+	})
+	if reg2.Code != http.StatusConflict {
+		t.Fatalf("duplicate register: expected %d, got %d; body: %s", http.StatusConflict, reg2.Code, reg2.Body.String())
+	}
+	resp2 := decodeLifecycleResponse(t, reg2)
+	if resp2.Error == nil || resp2.Error.Code != "EMAIL_ALREADY_EXISTS" {
+		t.Fatalf("expected EMAIL_ALREADY_EXISTS error, got: %s", reg2.Body.String())
+	}
+
+	// 3. Login with wrong password returns 401 with INVALID_CREDENTIALS
+	loginWrongPass := performJSONRequest(t, router, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email":    email,
+		"password": "wrong-password",
+	})
+	if loginWrongPass.Code != http.StatusUnauthorized {
+		t.Fatalf("login wrong pass: expected %d, got %d", http.StatusUnauthorized, loginWrongPass.Code)
+	}
+	respWrongPass := decodeLifecycleResponse(t, loginWrongPass)
+	if respWrongPass.Error == nil || respWrongPass.Error.Code != "INVALID_CREDENTIALS" {
+		t.Fatalf("expected INVALID_CREDENTIALS, got: %s", loginWrongPass.Body.String())
+	}
+
+	// 4. Login with non-existent email returns 401 with INVALID_CREDENTIALS
+	loginNonExistent := performJSONRequest(t, router, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email":    "nonexistent-" + uuid.NewString() + "@example.com",
+		"password": password,
+	})
+	if loginNonExistent.Code != http.StatusUnauthorized {
+		t.Fatalf("login non-existent: expected %d, got %d", http.StatusUnauthorized, loginNonExistent.Code)
+	}
+	respNonExistent := decodeLifecycleResponse(t, loginNonExistent)
+	if respNonExistent.Error == nil || respNonExistent.Error.Code != "INVALID_CREDENTIALS" {
+		t.Fatalf("expected INVALID_CREDENTIALS, got: %s", loginNonExistent.Body.String())
+	}
+}
