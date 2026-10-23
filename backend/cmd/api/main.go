@@ -77,7 +77,8 @@ func main() {
 		cfg.AppEnv == "development",
 	)
 
-	userHandler := handlers.NewUserHandler(userRepository)
+	userService := services.NewUserService(userRepository)
+	userHandler := handlers.NewUserHandler(userService)
 
 	router := gin.New()
 
@@ -96,7 +97,12 @@ func main() {
 
 	handlers.RegisterAuthRoutes(router, authHandler, tokenService)
 
-	router.GET("/api/v1/users/me", middleware.AuthRequired(tokenService), userHandler.Me)
+	usersGroup := router.Group("/api/v1/users", middleware.AuthRequired(tokenService))
+	{
+		usersGroup.GET("/me", userHandler.Me)
+		usersGroup.PATCH("/me", userHandler.UpdateProfile)
+		usersGroup.DELETE("/me", userHandler.DeleteAccount)
+	}
 
 	healthHandler := handlers.NewHealthHandler(db)
 
