@@ -17,6 +17,13 @@ func validConfig() *Config {
 		MediaAllowedTypes:        []string{"audio/mpeg", "image/png"},
 		MediaUploadRatePerMinute: 10,
 		MediaUploadRateBurst:     5,
+		RedisURL:                 "redis://localhost:6379/0",
+		RedisPoolSize:            10,
+		WorkerEnabled:            false,
+		WorkerConcurrency:        2,
+		JobMaxAttempts:           3,
+		JobLeaseDurationSeconds:  30,
+		JobDrainTimeoutSeconds:   10,
 	}
 }
 
@@ -128,5 +135,29 @@ func TestValidateMediaQuotaConfiguration(t *testing.T) {
 	cfg.MediaAllowedTypes = nil
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidQuotaConfig) {
 		t.Fatalf("expected ErrInvalidQuotaConfig, got %v", err)
+	}
+}
+
+func TestValidateWorkerConfiguration(t *testing.T) {
+	cfg := validConfig()
+	cfg.WorkerEnabled = true
+
+	// Missing Redis URL
+	cfg.RedisURL = ""
+	if err := cfg.Validate(); !errors.Is(err, ErrMissingRedisURL) {
+		t.Fatalf("expected ErrMissingRedisURL, got %v", err)
+	}
+
+	cfg.RedisURL = "redis://localhost:6379/0"
+
+	// Invalid concurrency
+	cfg.WorkerConcurrency = 0
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidWorkerConfig) {
+		t.Fatalf("expected ErrInvalidWorkerConfig for 0 concurrency, got %v", err)
+	}
+
+	cfg.WorkerConcurrency = 2
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid worker config, got %v", err)
 	}
 }

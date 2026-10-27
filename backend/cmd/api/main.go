@@ -13,11 +13,15 @@ import (
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/database"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/handlers"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/middleware"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/processor"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/queue"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/server"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/services"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/storage"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -123,6 +127,30 @@ func main() {
 	})
 	mediaHandler := handlers.NewMediaHandler(mediaService)
 
+	// Background Job System Setup
+	jobRepository := repositories.NewJobRepository(db)
+	mockProcessor := processor.NewMockProcessor()
+
+	var jobQueue queue.Queue
+	var onEnqueue func(ctx context.Context, jobID uuid.UUID) error
+
+	redisClient, redisErr := queue.NewRedisClient(queue.RedisConfig{
+		URL:      cfg.RedisURL,
+		PoolSize: cfg.RedisPoolSize,
+	})
+	if redisErr != nil {
+		logger.Warn("redis connection not established, background job enqueue will be deferred to outbox poller", "error", redisErr)
+	} else {
+		logger.Info("redis connected successfully for job queue")
+		jobQueue = queue.NewRedisQueue(redisClient, "echoself:jobs:ready")
+		onEnqueue = func(ctx context.Context, jobID uuid.UUID) error {
+			return jobQueue.Enqueue(ctx, jobID)
+		}
+	}
+
+	jobService := services.NewJobService(jobRepository, mediaService, mockProcessor, onEnqueue)
+	jobHandler := handlers.NewJobHandler(jobService)
+
 	router := gin.New()
 
 	if err := router.SetTrustedProxies(nil); err != nil {
@@ -167,6 +195,11 @@ func main() {
 		UploadRateBurst:     cfg.MediaUploadRateBurst,
 	})
 
+	handlers.RegisterJobRoutes(router, jobHandler, tokenService, handlers.JobRouteConfig{
+		SubmitRatePerSecond: rate.Limit(5),
+		SubmitBurst:         10,
+	})
+
 	healthHandler := handlers.NewHealthHandler(db)
 
 	router.GET("/health", healthHandler.Liveness)
@@ -206,6 +239,9 @@ func main() {
 			logger.Error("HTTP server failed", "error", err)
 		}
 
+		if redisClient != nil {
+			_ = redisClient.Close()
+		}
 		if closeErr := sqlDB.Close(); closeErr != nil {
 			logger.Error("database connection pool close failed", "error", closeErr)
 		}
@@ -220,6 +256,10 @@ func main() {
 		logger.Error("graceful shutdown failed", "error", err)
 	} else {
 		logger.Info("HTTP server stopped gracefully")
+	}
+
+	if redisClient != nil {
+		_ = redisClient.Close()
 	}
 
 	if err := sqlDB.Close(); err != nil {

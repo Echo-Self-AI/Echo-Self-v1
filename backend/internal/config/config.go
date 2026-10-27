@@ -31,6 +31,15 @@ type Config struct {
 	MediaAllowedTypes        []string
 	MediaUploadRatePerMinute int
 	MediaUploadRateBurst     int
+
+	// Redis & Background Worker Configuration
+	RedisURL                string
+	RedisPoolSize           int
+	WorkerEnabled           bool
+	WorkerConcurrency       int
+	JobMaxAttempts          int
+	JobLeaseDurationSeconds int
+	JobDrainTimeoutSeconds  int
 }
 
 func Load() *Config {
@@ -69,6 +78,15 @@ func Load() *Config {
 		MediaAllowedTypes:        allowedTypes,
 		MediaUploadRatePerMinute: getEnvInt("MEDIA_UPLOAD_RATE_PER_MINUTE", 10),
 		MediaUploadRateBurst:     getEnvInt("MEDIA_UPLOAD_RATE_BURST", 5),
+
+		// Redis & Background Jobs
+		RedisURL:                getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		RedisPoolSize:           getEnvInt("REDIS_POOL_SIZE", 10),
+		WorkerEnabled:           getEnvBool("WORKER_ENABLED", false),
+		WorkerConcurrency:       getEnvInt("WORKER_CONCURRENCY", 2),
+		JobMaxAttempts:          getEnvInt("JOB_MAX_ATTEMPTS", 3),
+		JobLeaseDurationSeconds: getEnvInt("JOB_LEASE_DURATION_SECONDS", 30),
+		JobDrainTimeoutSeconds:  getEnvInt("JOB_DRAIN_TIMEOUT_SECONDS", 10),
 	}
 
 	return cfg
