@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/storage"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
@@ -55,6 +56,7 @@ type MediaResult struct {
 
 type MediaRepository interface {
 	Create(ctx context.Context, media *models.Media) error
+	CreateWithQuotaCheck(ctx context.Context, media *models.Media, maxQuotaBytes int64, maxObjects int) error
 	FindByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Media, error)
 	ListByUserID(ctx context.Context, userID uuid.UUID, category string) ([]models.Media, error)
 	GetUserStorageUsage(ctx context.Context, userID uuid.UUID) (totalBytes int64, objectCount int64, err error)
@@ -236,9 +238,12 @@ func (s *MediaService) UploadMedia(
 		UpdatedAt:        now,
 	}
 
-	if err := s.repo.Create(ctx, media); err != nil {
-		// Compensating transaction: purge uploaded object if database persistence fails
+	if err := s.repo.CreateWithQuotaCheck(ctx, media, s.cfg.UserQuotaBytes, s.cfg.UserMaxObjects); err != nil {
+		// Compensating transaction: purge uploaded object if database persistence fails or quota exceeded
 		_ = s.storage.Delete(ctx, storageKey)
+		if errors.Is(err, repositories.ErrQuotaExceeded) {
+			return nil, fmt.Errorf("%w: quota reached during concurrent upload", ErrQuotaExceeded)
+		}
 		return nil, fmt.Errorf("persist media metadata: %w", err)
 	}
 
@@ -374,6 +379,33 @@ func (s *MediaService) DeleteMedia(
 	return nil
 }
 
+// ProcessPendingDeletions scans for media marked deletion_pending and cleans them up from storage.
+func (s *MediaService) ProcessPendingDeletions(ctx context.Context, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	pending, err := s.repo.ListPendingDeletions(ctx, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("list pending deletions: %w", err)
+	}
+
+	var cleaned int
+	for _, m := range pending {
+		delErr := s.storage.Delete(ctx, m.StorageKey)
+		if delErr != nil && !errors.Is(delErr, storage.ErrObjectNotFound) {
+			// Failed to delete from storage; retain for next retry cycle
+			continue
+		}
+
+		if err := s.repo.MarkStatus(ctx, m.ID, m.UserID, models.MediaStatusDeleted); err != nil {
+			continue
+		}
+		cleaned++
+	}
+
+	return cleaned, nil
+}
+
 // VerifyProcessingConsent validates purpose-specific consent before any future AI processing begins.
 // Uploading/storing private media does not grant processing rights.
 func (s *MediaService) VerifyProcessingConsent(
@@ -396,7 +428,7 @@ func (s *MediaService) VerifyProcessingConsent(
 	if err != nil {
 		return fmt.Errorf("find media: %w", err)
 	}
-	if record == nil || record.DeletedAt.Valid || record.Status == models.MediaStatusDeleted {
+	if record == nil || record.DeletedAt.Valid || record.Status == models.MediaStatusDeleted || record.Status == models.MediaStatusDeletionPending {
 		return ErrMediaNotFound
 	}
 

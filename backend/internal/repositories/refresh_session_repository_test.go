@@ -77,8 +77,15 @@ func TestRefreshSessionRotationRejectsReuse(t *testing.T) {
 		ExpiresAt: now.Add(24 * time.Hour),
 	}, now)
 
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("expected reuse to be rejected, got %v", err)
+	if !errors.Is(err, ErrTokenReuseDetected) {
+		t.Fatalf("expected ErrTokenReuseDetected on reuse, got %v", err)
+	}
+
+	// Verify all user sessions were revoked
+	var activeCount int64
+	db.Model(&models.RefreshSession{}).Where("user_id = ? AND revoked_at IS NULL", user.ID).Count(&activeCount)
+	if activeCount != 0 {
+		t.Fatalf("expected all sessions revoked on reuse, got %d active", activeCount)
 	}
 }
 

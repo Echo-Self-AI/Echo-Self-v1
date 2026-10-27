@@ -183,6 +183,7 @@ func (r *JobRepository) RenewLease(
 	ctx context.Context,
 	id uuid.UUID,
 	workerID string,
+	attemptCount int,
 	leaseDuration time.Duration,
 ) error {
 	now := time.Now().UTC()
@@ -190,7 +191,8 @@ func (r *JobRepository) RenewLease(
 
 	result := r.db.WithContext(ctx).
 		Model(&models.Job{}).
-		Where("id = ? AND locked_by = ? AND status = ?", id, workerID, models.JobStatusProcessing).
+		Where("id = ? AND locked_by = ? AND attempt_count = ? AND status = ? AND locked_until >= ?",
+			id, workerID, attemptCount, models.JobStatusProcessing, now).
 		Updates(map[string]any{
 			"locked_until": newExpiry,
 			"updated_at":   now,
@@ -209,12 +211,14 @@ func (r *JobRepository) MarkSucceeded(
 	ctx context.Context,
 	id uuid.UUID,
 	workerID string,
+	attemptCount int,
 	result models.JSONMap,
 ) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&models.Job{}).
-		Where("id = ? AND locked_by = ? AND status IN (?, ?)", id, workerID, models.JobStatusProcessing, models.JobStatusCancelRequested).
+		Where("id = ? AND locked_by = ? AND attempt_count = ? AND status IN (?, ?) AND locked_until >= ?",
+			id, workerID, attemptCount, models.JobStatusProcessing, models.JobStatusCancelRequested, now).
 		Updates(map[string]any{
 			"status":       models.JobStatusSucceeded,
 			"result":       result,
@@ -237,12 +241,14 @@ func (r *JobRepository) MarkFailed(
 	ctx context.Context,
 	id uuid.UUID,
 	workerID string,
+	attemptCount int,
 	errCode, errMsg string,
 ) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&models.Job{}).
-		Where("id = ? AND locked_by = ?", id, workerID).
+		Where("id = ? AND locked_by = ? AND attempt_count = ? AND status IN (?, ?) AND locked_until >= ?",
+			id, workerID, attemptCount, models.JobStatusProcessing, models.JobStatusCancelRequested, now).
 		Updates(map[string]any{
 			"status":        models.JobStatusFailed,
 			"error_code":    errCode,
@@ -266,13 +272,15 @@ func (r *JobRepository) ScheduleRetry(
 	ctx context.Context,
 	id uuid.UUID,
 	workerID string,
+	attemptCount int,
 	retryAt time.Time,
 	errCode, errMsg string,
 ) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&models.Job{}).
-		Where("id = ? AND locked_by = ?", id, workerID).
+		Where("id = ? AND locked_by = ? AND attempt_count = ? AND status IN (?, ?) AND locked_until >= ?",
+			id, workerID, attemptCount, models.JobStatusProcessing, models.JobStatusCancelRequested, now).
 		Updates(map[string]any{
 			"status":        models.JobStatusRetryWait,
 			"retry_at":      retryAt,
@@ -347,11 +355,12 @@ func (r *JobRepository) AcknowledgeCancellation(
 	ctx context.Context,
 	id uuid.UUID,
 	workerID string,
+	attemptCount int,
 ) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).
 		Model(&models.Job{}).
-		Where("id = ? AND locked_by = ?", id, workerID).
+		Where("id = ? AND locked_by = ? AND attempt_count = ?", id, workerID, attemptCount).
 		Updates(map[string]any{
 			"status":       models.JobStatusCancelled,
 			"completed_at": now,
@@ -361,13 +370,14 @@ func (r *JobRepository) AcknowledgeCancellation(
 		}).Error
 }
 
-// GetPendingOutbox retrieves pending outbox events for dispatch to Redis.
+// GetPendingOutbox retrieves pending outbox events for dispatch to Redis using SKIP LOCKED for safe multi-dispatcher concurrency.
 func (r *JobRepository) GetPendingOutbox(
 	ctx context.Context,
 	limit int,
 ) ([]models.JobOutbox, error) {
 	var list []models.JobOutbox
 	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where("status = ?", models.OutboxStatusPending).
 		Order("created_at ASC").
 		Limit(limit).
@@ -407,7 +417,24 @@ func (r *JobRepository) MarkOutboxFailed(
 		}).Error
 }
 
-// RecoverStaleJobs finds jobs whose workers died or timed out and resets or fails them.
+// CleanupPublishedOutbox removes published outbox records older than the retention period.
+func (r *JobRepository) CleanupPublishedOutbox(
+	ctx context.Context,
+	olderThan time.Duration,
+	limit int,
+) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	threshold := time.Now().UTC().Add(-olderThan)
+	res := r.db.WithContext(ctx).
+		Where("status = ? AND published_at <= ?", models.OutboxStatusPublished, threshold).
+		Limit(limit).
+		Delete(&models.JobOutbox{})
+	return res.RowsAffected, res.Error
+}
+
+// RecoverStaleJobs finds jobs whose workers died or timed out and resets them for retry or fails them if max attempts exceeded.
 func (r *JobRepository) RecoverStaleJobs(
 	ctx context.Context,
 	limit int,
@@ -417,7 +444,7 @@ func (r *JobRepository) RecoverStaleJobs(
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var staleJobs []models.Job
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("status = ? AND locked_until < ?", models.JobStatusProcessing, now).
 			Limit(limit).
 			Find(&staleJobs).Error
@@ -462,4 +489,116 @@ func (r *JobRepository) RecoverStaleJobs(
 		return 0, err
 	}
 	return recovered, nil
+}
+
+// RequeueDueRetries transitions jobs whose retry_at has arrived back to queued and inserts outbox records for Redis dispatch.
+func (r *JobRepository) RequeueDueRetries(
+	ctx context.Context,
+	limit int,
+) (int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	now := time.Now().UTC()
+	var requeued int64
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var dueJobs []models.Job
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status = ? AND retry_at <= ?", models.JobStatusRetryWait, now).
+			Limit(limit).
+			Find(&dueJobs).Error
+		if err != nil {
+			return err
+		}
+
+		for _, job := range dueJobs {
+			outbox := models.JobOutbox{
+				ID:        uuid.New(),
+				JobID:     job.ID,
+				EventType: models.OutboxEventJobQueued,
+				Status:    models.OutboxStatusPending,
+				Payload:   models.JSONMap{"retry": true, "attempt": job.AttemptCount},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := tx.Create(&outbox).Error; err != nil {
+				return err
+			}
+
+			if err := tx.Model(&models.Job{}).
+				Where("id = ? AND status = ?", job.ID, models.JobStatusRetryWait).
+				Updates(map[string]any{
+					"status":     models.JobStatusQueued,
+					"retry_at":   nil,
+					"updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+			requeued++
+		}
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+	return requeued, nil
+}
+
+// RecoverOrphanedQueuedJobs re-publishes outbox events for jobs stuck in queued state without active workers.
+func (r *JobRepository) RecoverOrphanedQueuedJobs(
+	ctx context.Context,
+	olderThan time.Duration,
+	limit int,
+) (int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	threshold := time.Now().UTC().Add(-olderThan)
+	var count int64
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var orphaned []models.Job
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status = ? AND created_at <= ? AND locked_by IS NULL", models.JobStatusQueued, threshold).
+			Limit(limit).
+			Find(&orphaned).Error
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		for _, job := range orphaned {
+			var pendingCount int64
+			if err := tx.Model(&models.JobOutbox{}).
+				Where("job_id = ? AND status = ?", job.ID, models.OutboxStatusPending).
+				Count(&pendingCount).Error; err != nil {
+				return err
+			}
+			if pendingCount > 0 {
+				continue
+			}
+
+			outbox := models.JobOutbox{
+				ID:        uuid.New(),
+				JobID:     job.ID,
+				EventType: models.OutboxEventJobQueued,
+				Status:    models.OutboxStatusPending,
+				Payload:   models.JSONMap{"recovered_orphan": true},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := tx.Create(&outbox).Error; err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }

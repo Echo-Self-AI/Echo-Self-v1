@@ -82,9 +82,9 @@ func TestJobService_Submit(t *testing.T) {
 	store := storage.NewMemoryStorage()
 	mediaService := NewMediaService(mediaRepo, store, nil, defaultTestMediaConfig())
 
-	var enqueuedJob uuid.UUID
+	enqueueChan := make(chan uuid.UUID, 1)
 	onEnqueue := func(ctx context.Context, id uuid.UUID) error {
-		enqueuedJob = id
+		enqueueChan <- id
 		return nil
 	}
 
@@ -136,10 +136,14 @@ func TestJobService_Submit(t *testing.T) {
 		t.Errorf("expected user id %q, got %q", userID, res.UserID)
 	}
 
-	// Wait briefly for asynchronous enqueue hook
-	time.Sleep(10 * time.Millisecond)
-	if enqueuedJob.String() != res.ID {
-		t.Errorf("expected enqueuedJob %s, got %s", res.ID, enqueuedJob.String())
+	// Synchronously wait for asynchronous enqueue hook
+	select {
+	case enqueuedJob := <-enqueueChan:
+		if enqueuedJob.String() != res.ID {
+			t.Errorf("expected enqueuedJob %s, got %s", res.ID, enqueuedJob.String())
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for onEnqueue hook")
 	}
 
 	// 5. Get Job

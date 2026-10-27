@@ -10,6 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var (
+	ErrTokenReuseDetected = errors.New("refresh token reuse detected")
+)
+
 type RefreshSessionRepository struct {
 	db *gorm.DB
 }
@@ -45,7 +49,16 @@ func (r *RefreshSessionRepository) Rotate(
 			return err
 		}
 
-		if current.RevokedAt != nil || !current.ExpiresAt.After(now) {
+		// Security: Detect refresh token reuse (RFC 6819)
+		// If a revoked token is used again, invalidate ALL active sessions for this user to mitigate theft
+		if current.RevokedAt != nil {
+			_ = tx.Model(&models.RefreshSession{}).
+				Where("user_id = ? AND revoked_at IS NULL", current.UserID).
+				Update("revoked_at", now).Error
+			return ErrTokenReuseDetected
+		}
+
+		if !current.ExpiresAt.After(now) {
 			return gorm.ErrRecordNotFound
 		}
 

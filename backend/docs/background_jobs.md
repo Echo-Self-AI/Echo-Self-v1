@@ -248,3 +248,18 @@ func (p *FastAPIProcessor) Process(ctx context.Context, req processor.ProcessReq
 ```
 
 The worker, Redis queue, PostgreSQL state machine, and retry policies remain entirely identical.
+
+---
+
+## 10. Distributed Reliability & Failure Hardening (Phase 7)
+
+EchoSelf's distributed background architecture is hardened against real-world crashes, network partitions, and edge cases:
+
+* **At-Least-Once Delivery & Idempotency**: Redis acts as an ephemeral notifier (`LPUSH`/`BRPOP`). State transitions in PostgreSQL are protected by atomic conditional updates. If a delivery occurs more than once, subsequent claims fail cleanly with `ErrJobAlreadyClaimed`.
+* **Monotonic Fencing Tokens**: Every job claim increments `attempt_count`. All status modifications (`MarkSucceeded`, `MarkFailed`, `ScheduleRetry`, `RenewLease`, `AcknowledgeCancellation`) enforce `attempt_count = claimedAttempt AND locked_until >= now`. If a worker loses its lease and another worker reclaims the job, the stale worker's commit is unconditionally rejected with `ErrInvalidLeaseHolder`.
+* **Heartbeat Failure Context Abortion**: If `RenewLease` fails during active processing (e.g., due to database disconnection or lease preemption), the heartbeat immediately cancels `procCancel()`, cleanly terminating long-running processing goroutines.
+* **Persistent Retry Re-queuing**: Jobs transitioning to `retry_wait` have persistent `retry_at` timestamps in PostgreSQL. The background worker's `RequeueDueRetries` sweeper periodically polls due retries (`retry_at <= now`), resets their status to `queued`, and creates pending outbox records to re-publish to Redis. Retry schedules survive complete application restarts.
+* **Orphaned Queued Job Recovery**: If a worker dequeues a job from Redis and crashes before calling `ClaimJob`, `RecoverOrphanedQueuedJobs` re-creates outbox dispatch events for jobs that have remained un-claimed beyond the threshold.
+* **Multi-Dispatcher Concurrency Protection**: Outbox queries utilize `FOR UPDATE SKIP LOCKED`, allowing horizontally scaled API/worker instances to dispatch disjoint batches without duplicate enqueueing or lock contention.
+* **Published Outbox Cleanup**: `CleanupPublishedOutbox` safely cleans up delivered outbox entries older than the retention window without deleting pending events.
+* **Account Deletion Invalidation**: When an account is deleted, all pending/queued/retry jobs are atomically marked `cancelled` with `error_code: ACCOUNT_DELETED`, and running jobs are updated to `cancel_requested` so workers immediately abort execution.

@@ -207,7 +207,7 @@ func (s *AuthService) Refresh(
 		newSession,
 		now,
 	); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, repositories.ErrTokenReuseDetected) {
 			return nil, ErrInvalidCredentials
 		}
 

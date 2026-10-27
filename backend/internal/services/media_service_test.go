@@ -53,6 +53,22 @@ func (m *mockMediaRepo) Create(ctx context.Context, media *models.Media) error {
 	return nil
 }
 
+func (m *mockMediaRepo) CreateWithQuotaCheck(ctx context.Context, media *models.Media, maxQuotaBytes int64, maxObjects int) error {
+	if m.failCreate != nil {
+		return m.failCreate
+	}
+	if maxObjects > 0 && m.objectCount >= int64(maxObjects) {
+		return repositories.ErrQuotaExceeded
+	}
+	if maxQuotaBytes > 0 && m.storageBytes+media.FileSize > maxQuotaBytes {
+		return repositories.ErrQuotaExceeded
+	}
+	m.records[media.ID] = media
+	m.storageBytes += media.FileSize
+	m.objectCount++
+	return nil
+}
+
 func (m *mockMediaRepo) FindByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Media, error) {
 	r, ok := m.records[id]
 	if !ok || r.UserID != userID {
@@ -476,5 +492,80 @@ func TestMediaService_LifecycleWithDB(t *testing.T) {
 	_, err = service.GetMedia(ctx, user.ID.String(), res.ID)
 	if !errors.Is(err, ErrMediaNotFound) {
 		t.Fatalf("expected ErrMediaNotFound after delete, got %v", err)
+	}
+}
+
+func TestMediaService_ProcessPendingDeletions(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := newMockMediaRepo()
+	store := storage.NewMemoryStorage()
+	service := NewMediaService(mockRepo, store, nil, defaultTestMediaConfig())
+
+	userID := uuid.New()
+	mediaID := uuid.New()
+	storageKey := "media/" + userID.String() + "/" + mediaID.String()
+
+	// Seed object in storage and marked deletion_pending in db
+	_ = store.Upload(ctx, storageKey, bytes.NewReader(sampleWAV), int64(len(sampleWAV)), "audio/wav")
+	mockRepo.records[mediaID] = &models.Media{
+		ID:         mediaID,
+		UserID:     userID,
+		StorageKey: storageKey,
+		Status:     models.MediaStatusDeletionPending,
+	}
+
+	cleaned, err := service.ProcessPendingDeletions(ctx, 10)
+	if err != nil {
+		t.Fatalf("process pending deletions error: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("expected 1 cleaned media item, got %d", cleaned)
+	}
+
+	// Verify object removed from storage
+	exists, _ := store.Exists(ctx, storageKey)
+	if exists {
+		t.Fatal("expected object to be removed from storage after purge")
+	}
+
+	// Verify status updated to deleted in repository
+	if mockRepo.records[mediaID].Status != models.MediaStatusDeleted {
+		t.Fatalf("expected record status deleted, got %s", mockRepo.records[mediaID].Status)
+	}
+}
+
+func TestMediaService_ConcurrentQuotaRejection(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := newMockMediaRepo()
+	store := storage.NewMemoryStorage()
+	cfg := defaultTestMediaConfig()
+	cfg.UserQuotaBytes = int64(len(sampleWAV)) // Quota allows exactly ONE file
+	service := NewMediaService(mockRepo, store, nil, cfg)
+
+	userID := uuid.New().String()
+
+	// Upload first file: should succeed
+	res1, err := service.UploadMedia(ctx, userID, UploadMediaInput{
+		Category:     models.MediaCategoryVoiceSample,
+		Filename:     "voice1.wav",
+		DeclaredSize: int64(len(sampleWAV)),
+		Reader:       bytes.NewReader(sampleWAV),
+	})
+	if err != nil {
+		t.Fatalf("first upload failed: %v", err)
+	}
+	if res1 == nil {
+		t.Fatal("expected result for first upload")
+	}
+
+	// Second upload for same user exceeds quota during CreateWithQuotaCheck: should fail with ErrQuotaExceeded
+	_, err = service.UploadMedia(ctx, userID, UploadMediaInput{
+		Category:     models.MediaCategoryVoiceSample,
+		Filename:     "voice2.wav",
+		DeclaredSize: int64(len(sampleWAV)),
+		Reader:       bytes.NewReader(sampleWAV),
+	})
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded for second upload exceeding quota, got %v", err)
 	}
 }

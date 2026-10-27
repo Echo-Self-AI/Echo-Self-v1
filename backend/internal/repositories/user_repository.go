@@ -144,6 +144,31 @@ func (r *UserRepository) DeleteAccount(
 			return err
 		}
 
+		// Cancel pending and retry_wait jobs immediately
+		if err := tx.Model(&models.Job{}).
+			Where("user_id = ? AND status IN (?, ?)", id, models.JobStatusQueued, models.JobStatusRetryWait).
+			Updates(map[string]interface{}{
+				"status":              models.JobStatusCancelled,
+				"error_code":          "ACCOUNT_DELETED",
+				"error_message":       "Account was deleted by user",
+				"cancel_requested_at": now,
+				"completed_at":        now,
+				"updated_at":          now,
+			}).Error; err != nil {
+			return err
+		}
+
+		// Request cancellation for actively processing jobs so workers abort at next checkpoint
+		if err := tx.Model(&models.Job{}).
+			Where("user_id = ? AND status = ?", id, models.JobStatusProcessing).
+			Updates(map[string]interface{}{
+				"status":              models.JobStatusCancelRequested,
+				"cancel_requested_at": now,
+				"updated_at":          now,
+			}).Error; err != nil {
+			return err
+		}
+
 		return nil
 	})
 }

@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrMediaNotFound = errors.New("media record not found")
+	ErrQuotaExceeded = errors.New("user storage quota exceeded")
 )
 
 type MediaRepository struct {
@@ -25,6 +26,49 @@ func NewMediaRepository(db *gorm.DB) *MediaRepository {
 
 func (r *MediaRepository) Create(ctx context.Context, media *models.Media) error {
 	return r.db.WithContext(ctx).Create(media).Error
+}
+
+// CreateWithQuotaCheck inserts media metadata within a transaction while locking the user row to serialize concurrent uploads.
+func (r *MediaRepository) CreateWithQuotaCheck(
+	ctx context.Context,
+	media *models.Media,
+	maxQuotaBytes int64,
+	maxObjects int,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Acquire exclusive lock on the user row to serialize concurrent uploads for this user
+		var user models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&user, "id = ?", media.UserID).Error; err != nil {
+			return err
+		}
+
+		type UsageResult struct {
+			TotalBytes  *int64
+			ObjectCount int64
+		}
+		var res UsageResult
+		if err := tx.Model(&models.Media{}).
+			Where("user_id = ? AND status != ?", media.UserID, models.MediaStatusDeleted).
+			Select("COALESCE(SUM(file_size), 0) AS total_bytes, COUNT(id) AS object_count").
+			Scan(&res).Error; err != nil {
+			return err
+		}
+
+		var currentBytes int64
+		if res.TotalBytes != nil {
+			currentBytes = *res.TotalBytes
+		}
+
+		if maxObjects > 0 && res.ObjectCount >= int64(maxObjects) {
+			return ErrQuotaExceeded
+		}
+		if maxQuotaBytes > 0 && currentBytes+media.FileSize > maxQuotaBytes {
+			return ErrQuotaExceeded
+		}
+
+		return tx.Create(media).Error
+	})
 }
 
 func (r *MediaRepository) FindByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Media, error) {

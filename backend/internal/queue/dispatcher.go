@@ -78,6 +78,9 @@ func (d *OutboxDispatcher) Start(ctx context.Context, pollInterval time.Duration
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	cleanupTicker := time.NewTicker(1 * time.Minute)
+	defer cleanupTicker.Stop()
+
 	d.logger.Info("outbox dispatcher started", "poll_interval", pollInterval.String())
 
 	for {
@@ -88,6 +91,20 @@ func (d *OutboxDispatcher) Start(ctx context.Context, pollInterval time.Duration
 		case <-ticker.C:
 			if _, err := d.DispatchOnce(ctx, batchSize); err != nil {
 				d.logger.Warn("outbox dispatch cycle encountered error", "error", err)
+			}
+		case <-cleanupTicker.C:
+			// 1. Recover queued jobs whose Redis message was lost due to consumer crash before claim
+			if orphaned, err := d.repo.RecoverOrphanedQueuedJobs(ctx, 2*time.Minute, batchSize); err != nil {
+				d.logger.Warn("failed to recover orphaned queued jobs", "error", err)
+			} else if orphaned > 0 {
+				d.logger.Info("recovered orphaned queued jobs", "count", orphaned)
+			}
+
+			// 2. Clean up published outbox records older than 24 hours
+			if cleaned, err := d.repo.CleanupPublishedOutbox(ctx, 24*time.Hour, 100); err != nil {
+				d.logger.Warn("failed to clean up published outbox records", "error", err)
+			} else if cleaned > 0 {
+				d.logger.Info("cleaned up published outbox records", "count", cleaned)
 			}
 		}
 	}

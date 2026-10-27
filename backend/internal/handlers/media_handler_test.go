@@ -52,6 +52,13 @@ func (m *handlerMockRepo) Create(ctx context.Context, media *models.Media) error
 	return nil
 }
 
+func (m *handlerMockRepo) CreateWithQuotaCheck(ctx context.Context, media *models.Media, maxQuotaBytes int64, maxObjects int) error {
+	m.records[media.ID] = media
+	m.storageBytes += media.FileSize
+	m.objectCount++
+	return nil
+}
+
 func (m *handlerMockRepo) FindByIDAndUserID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Media, error) {
 	r, ok := m.records[id]
 	if !ok || r.UserID != userID {

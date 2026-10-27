@@ -98,6 +98,8 @@ func main() {
 	dispatcher := queue.NewOutboxDispatcher(jobRepo, jobQueue, logger)
 	go dispatcher.Start(dispatcherCtx, 500*time.Millisecond, 50)
 
+	userRepo := repositories.NewUserRepository(db)
+
 	// Worker Engine
 	workerEngine := worker.NewWorker(
 		jobRepo,
@@ -114,6 +116,7 @@ func main() {
 		},
 		logger,
 	)
+	workerEngine.SetUserRepository(userRepo)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()

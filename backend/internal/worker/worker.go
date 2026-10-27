@@ -29,17 +29,23 @@ type WorkerConfig struct {
 
 type JobRepository interface {
 	ClaimJob(ctx context.Context, id uuid.UUID, workerID string, leaseDuration time.Duration) (*models.Job, error)
-	RenewLease(ctx context.Context, id uuid.UUID, workerID string, leaseDuration time.Duration) error
-	MarkSucceeded(ctx context.Context, id uuid.UUID, workerID string, result models.JSONMap) error
-	MarkFailed(ctx context.Context, id uuid.UUID, workerID string, errCode, errMsg string) error
-	ScheduleRetry(ctx context.Context, id uuid.UUID, workerID string, retryAt time.Time, errCode, errMsg string) error
+	RenewLease(ctx context.Context, id uuid.UUID, workerID string, attemptCount int, leaseDuration time.Duration) error
+	MarkSucceeded(ctx context.Context, id uuid.UUID, workerID string, attemptCount int, result models.JSONMap) error
+	MarkFailed(ctx context.Context, id uuid.UUID, workerID string, attemptCount int, errCode, errMsg string) error
+	ScheduleRetry(ctx context.Context, id uuid.UUID, workerID string, attemptCount int, retryAt time.Time, errCode, errMsg string) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Job, error)
-	AcknowledgeCancellation(ctx context.Context, id uuid.UUID, workerID string) error
+	AcknowledgeCancellation(ctx context.Context, id uuid.UUID, workerID string, attemptCount int) error
 	RecoverStaleJobs(ctx context.Context, limit int) (int64, error)
+	RequeueDueRetries(ctx context.Context, limit int) (int64, error)
+}
+
+type UserRepository interface {
+	FindByID(ctx context.Context, id string) (*models.User, error)
 }
 
 type Worker struct {
 	repo         JobRepository
+	userRepo     UserRepository
 	queue        queue.Queue
 	processor    processor.Processor
 	mediaService *services.MediaService
@@ -94,6 +100,11 @@ func NewWorker(
 	}
 }
 
+// SetUserRepository attaches user repository for active account verification.
+func (w *Worker) SetUserRepository(ur UserRepository) {
+	w.userRepo = ur
+}
+
 // Start launches worker goroutines and the stale recovery sweeper.
 func (w *Worker) Start(ctx context.Context) {
 	w.logger.Info("starting background workers",
@@ -101,7 +112,7 @@ func (w *Worker) Start(ctx context.Context) {
 		"lease_duration", w.cfg.LeaseDuration.String(),
 	)
 
-	// Launch stale job recovery sweeper
+	// Launch stale job recovery and retry sweeper
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
@@ -174,7 +185,7 @@ func (w *Worker) runConsumer(ctx context.Context, index int) {
 func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	jobLog := w.logger.With("job_id", jobID.String())
 
-	// 1. Conditionally claim the job lease in PostgreSQL
+	// 1. Conditionally claim the job lease in PostgreSQL with monotonic attempt generation
 	job, err := w.repo.ClaimJob(ctx, jobID, w.cfg.WorkerID, w.cfg.LeaseDuration)
 	if err != nil {
 		if errors.Is(err, repositories.ErrJobAlreadyClaimed) ||
@@ -196,11 +207,20 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	// 2. Cancellation Check: Did the user request cancellation while queued or running?
 	if job.Status == models.JobStatusCancelRequested || job.CancelRequestedAt != nil {
 		jobLog.Info("job cancellation requested, acknowledging cancellation")
-		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID)
+		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount)
 		return
 	}
 
-	// 3. Consent Re-Verification: Recheck purpose-specific consent immediately before processing
+	// 3. User & Consent Re-Verification: Recheck user active status and purpose-specific consent immediately before processing
+	if w.userRepo != nil {
+		user, err := w.userRepo.FindByID(ctx, job.UserID.String())
+		if err != nil || user == nil || user.DeletedAt.Valid {
+			jobLog.Warn("user account is inactive or deleted, aborting job")
+			_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "ACCOUNT_INACTIVE", "User account is deleted or inactive")
+			return
+		}
+	}
+
 	if job.InputMediaID != nil && w.mediaService != nil {
 		purpose := resolveConsentPurpose(job.JobType)
 		if err := w.mediaService.VerifyProcessingConsent(ctx, job.UserID.String(), job.InputMediaID.String(), purpose); err != nil {
@@ -209,17 +229,17 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 				"error", err,
 			)
 			// Permanent failure: Consent not granted or revoked -> do NOT retry!
-			_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, "CONSENT_REVOKED", "Consent not granted or revoked for this operation")
+			_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "CONSENT_REVOKED", "Consent not granted or revoked for this operation")
 			return
 		}
 	}
 
-	// 4. Start lease renewal heartbeat
+	// 4. Start lease renewal heartbeat with cancellation capability
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 
 	renewDone := make(chan struct{})
-	go w.heartbeatLease(procCtx, job.ID, renewDone)
+	go w.heartbeatLease(procCtx, procCancel, job.ID, job.AttemptCount, renewDone)
 	defer func() {
 		close(renewDone)
 	}()
@@ -239,15 +259,15 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	latest, _ := w.repo.FindByID(ctx, job.ID)
 	if latest != nil && (latest.Status == models.JobStatusCancelRequested || latest.CancelRequestedAt != nil) {
 		jobLog.Info("cancellation acknowledged during processing completion")
-		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID)
+		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount)
 		return
 	}
 
-	// 6. Handle Outcome
+	// 6. Handle Outcome with fencing token validation
 	if err == nil {
 		// Succeeded: Persist result
-		if err := w.repo.MarkSucceeded(ctx, job.ID, w.cfg.WorkerID, res.Output); err != nil {
-			jobLog.Error("failed to mark job succeeded in db", "error", err)
+		if err := w.repo.MarkSucceeded(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, res.Output); err != nil {
+			jobLog.Error("failed to mark job succeeded in db (fencing or terminal conflict)", "error", err)
 		} else {
 			jobLog.Info("job succeeded")
 		}
@@ -259,14 +279,14 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 
 	// Permanent failures: do NOT retry
 	if errors.Is(err, processor.ErrPermanentFailure) || errors.Is(err, processor.ErrUnsupportedJobType) {
-		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, "PERMANENT_FAILURE", err.Error())
+		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "PERMANENT_FAILURE", err.Error())
 		return
 	}
 
 	// Check if attempts exhausted
 	if job.AttemptCount >= job.MaxAttempts {
 		jobLog.Error("job exceeded max attempts, marking failed", "attempts", job.AttemptCount)
-		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, "MAX_ATTEMPTS_EXCEEDED", "Maximum retry attempts exceeded")
+		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "MAX_ATTEMPTS_EXCEEDED", "Maximum retry attempts exceeded")
 		return
 	}
 
@@ -278,10 +298,16 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 		"retry_at", retryAt.Format(time.RFC3339),
 	)
 
-	_ = w.repo.ScheduleRetry(ctx, job.ID, w.cfg.WorkerID, retryAt, "TRANSIENT_FAILURE", err.Error())
+	_ = w.repo.ScheduleRetry(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, retryAt, "TRANSIENT_FAILURE", err.Error())
 }
 
-func (w *Worker) heartbeatLease(ctx context.Context, jobID uuid.UUID, done chan struct{}) {
+func (w *Worker) heartbeatLease(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	jobID uuid.UUID,
+	attemptCount int,
+	done chan struct{},
+) {
 	interval := w.cfg.LeaseDuration / 3
 	if interval < 2*time.Second {
 		interval = 2 * time.Second
@@ -297,8 +323,9 @@ func (w *Worker) heartbeatLease(ctx context.Context, jobID uuid.UUID, done chan 
 		case <-done:
 			return
 		case <-ticker.C:
-			if err := w.repo.RenewLease(ctx, jobID, w.cfg.WorkerID, w.cfg.LeaseDuration); err != nil {
-				w.logger.Warn("failed to renew job lease", "job_id", jobID, "error", err)
+			if err := w.repo.RenewLease(ctx, jobID, w.cfg.WorkerID, attemptCount, w.cfg.LeaseDuration); err != nil {
+				w.logger.Warn("failed to renew job lease; aborting active processing context", "job_id", jobID, "error", err)
+				cancel()
 				return
 			}
 		}
@@ -316,11 +343,30 @@ func (w *Worker) runStaleRecovery(ctx context.Context) {
 		case <-w.stopChan:
 			return
 		case <-ticker.C:
+			// 1. Recover stale processing jobs where worker timed out or died
 			recovered, err := w.repo.RecoverStaleJobs(ctx, 50)
 			if err != nil {
 				w.logger.Error("stale job recovery error", "error", err)
 			} else if recovered > 0 {
 				w.logger.Info("recovered stale unfinished jobs", "count", recovered)
+			}
+
+			// 2. Re-queue retry jobs whose backoff timestamp has expired
+			requeued, err := w.repo.RequeueDueRetries(ctx, 50)
+			if err != nil {
+				w.logger.Error("retry requeue error", "error", err)
+			} else if requeued > 0 {
+				w.logger.Info("re-queued due retry jobs", "count", requeued)
+			}
+
+			// 3. Process pending media deletions from storage
+			if w.mediaService != nil {
+				deletedMedia, err := w.mediaService.ProcessPendingDeletions(ctx, 50)
+				if err != nil {
+					w.logger.Error("pending media deletion cleanup error", "error", err)
+				} else if deletedMedia > 0 {
+					w.logger.Info("cleaned up pending media deletions", "count", deletedMedia)
+				}
 			}
 		}
 	}
