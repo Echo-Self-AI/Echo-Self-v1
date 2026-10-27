@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/server"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/services"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -84,19 +86,61 @@ func main() {
 	consentService := services.NewConsentService(consentRepository)
 	consentHandler := handlers.NewConsentHandler(consentService)
 
+	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
+
+	// Cloudflare R2 / Object Storage Setup
+	var storageService storage.Storage
+	if cfg.R2Enabled {
+		logger.Info("initializing Cloudflare R2 storage", "bucket", cfg.R2BucketName, "region", cfg.R2Region)
+		r2Store, err := storage.NewR2Storage(context.Background(), storage.R2Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2BucketName,
+			Endpoint:        cfg.R2Endpoint,
+			Region:          cfg.R2Region,
+		})
+		if err != nil {
+			log.Fatalf("failed to initialize Cloudflare R2 storage: %v", err)
+		}
+		storageService = r2Store
+	} else {
+		logger.Info("cloud storage is not enabled; using in-memory fake storage")
+		storageService = storage.NewMemoryStorage()
+	}
+
+	allowedTypesMap := make(map[string]bool)
+	for _, t := range cfg.MediaAllowedTypes {
+		allowedTypesMap[t] = true
+	}
+
+	mediaRepository := repositories.NewMediaRepository(db)
+	mediaService := services.NewMediaService(mediaRepository, storageService, consentService, services.MediaConfig{
+		MaxUploadSizeBytes: cfg.MediaMaxUploadSizeBytes,
+		UserQuotaBytes:     cfg.MediaUserQuotaBytes,
+		UserMaxObjects:     cfg.MediaUserMaxObjects,
+		AllowedTypes:       allowedTypesMap,
+	})
+	mediaHandler := handlers.NewMediaHandler(mediaService)
+
 	router := gin.New()
 
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("trusted proxy configuration failed: %v", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
-
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestID())
 	router.Use(middleware.RequestLogger(logger))
 	router.Use(middleware.SecurityHeaders())
-	router.Use(middleware.RequestSizeLimit(middleware.MaxRequestBodySize))
+	router.Use(func(c *gin.Context) {
+		// Media endpoints enforce their own upload size limit
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/media") {
+			c.Next()
+			return
+		}
+		middleware.RequestSizeLimit(middleware.MaxRequestBodySize)(c)
+	})
 	router.Use(middleware.RateLimit())
 
 	handlers.RegisterAuthRoutes(router, authHandler, tokenService)
@@ -116,6 +160,12 @@ func main() {
 		consentsGroup.POST("/:id/revoke", consentHandler.Revoke)
 		consentsGroup.GET("/:id/audit", consentHandler.AuditLogs)
 	}
+
+	handlers.RegisterMediaRoutes(router, mediaHandler, tokenService, handlers.MediaRouteConfig{
+		MaxUploadSizeBytes:  cfg.MediaMaxUploadSizeBytes,
+		UploadRatePerMinute: cfg.MediaUploadRatePerMinute,
+		UploadRateBurst:     cfg.MediaUploadRateBurst,
+	})
 
 	healthHandler := handlers.NewHealthHandler(db)
 

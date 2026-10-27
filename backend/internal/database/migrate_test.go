@@ -46,4 +46,14 @@ func TestMigrationLifecycle(t *testing.T) {
 	if err := Baseline(db, 1); err != nil {
 		t.Fatalf("baseline on migrated DB failed: %v", err)
 	}
+
+	// Test rollback of the latest migration step (down migration)
+	if err := MigrateStep(db, -1); err != nil {
+		t.Fatalf("rollback 1 migration step failed: %v", err)
+	}
+
+	// Re-apply migration back to latest version
+	if err := Migrate(db); err != nil {
+		t.Fatalf("re-apply migration up after rollback failed: %v", err)
+	}
 }

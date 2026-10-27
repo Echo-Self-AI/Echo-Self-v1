@@ -134,6 +134,16 @@ func (r *UserRepository) DeleteAccount(
 			return err
 		}
 
+		// Soft delete media records and mark deletion pending
+		if err := tx.Model(&models.Media{}).
+			Where("user_id = ? AND deleted_at IS NULL", id).
+			Updates(map[string]interface{}{
+				"status":     models.MediaStatusDeletionPending,
+				"deleted_at": now,
+			}).Error; err != nil {
+			return err
+		}
+
 		return nil
 	})
 }
