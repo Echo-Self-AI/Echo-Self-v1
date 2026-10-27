@@ -11,7 +11,9 @@ import (
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/config"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/database"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/email"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/handlers"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/metrics"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/middleware"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/processor"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/queue"
@@ -35,13 +37,17 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
+
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("database initialization failed: %v", err)
 	}
 
-	if err := database.Migrate(db); err != nil {
-		log.Fatalf("database migration failed: %v", err)
+	if cfg.AutoMigrate {
+		if err := database.Migrate(db); err != nil {
+			log.Fatalf("database migration failed: %v", err)
+		}
 	}
 
 	sqlDB, err := db.DB()
@@ -76,6 +82,27 @@ func main() {
 		passwordResetRepository,
 	)
 
+	// Configure Transactional Email Delivery
+	var emailSender email.Sender
+	if cfg.SMTPEnabled {
+		logger.Info("configuring SMTP email delivery", "host", cfg.SMTPHost, "port", cfg.SMTPPort, "from", cfg.SMTPFrom)
+		emailSender = email.NewSMTPSender(email.SMTPConfig{
+			Host:     cfg.SMTPHost,
+			Port:     cfg.SMTPPort,
+			Username: cfg.SMTPUsername,
+			Password: cfg.SMTPPassword,
+			From:     cfg.SMTPFrom,
+			UseTLS:   cfg.SMTPUseTLS,
+			Timeout:  10 * time.Second,
+		})
+	} else {
+		logger.Info("SMTP disabled; transactional emails will be simulated via logs")
+		emailSender = email.NewLogSender(logger, cfg.SMTPFrom)
+	}
+
+	emailVerificationService.SetEmailSender(emailSender, cfg.FrontendBaseURL)
+	passwordResetService.SetEmailSender(emailSender, cfg.FrontendBaseURL)
+
 	authHandler := handlers.NewAuthHandler(
 		authService,
 		emailVerificationService,
@@ -89,8 +116,6 @@ func main() {
 	consentRepository := repositories.NewConsentRepository(db)
 	consentService := services.NewConsentService(consentRepository)
 	consentHandler := handlers.NewConsentHandler(consentService)
-
-	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
 
 	// Cloudflare R2 / Object Storage Setup
 	var storageService storage.Storage
@@ -158,6 +183,7 @@ func main() {
 	}
 
 	router.Use(gin.Recovery())
+	router.Use(metrics.Middleware())
 	router.Use(middleware.RequestID())
 	router.Use(middleware.RequestLogger(logger))
 	router.Use(middleware.SecurityHeaders())
@@ -201,9 +227,15 @@ func main() {
 	})
 
 	healthHandler := handlers.NewHealthHandler(db)
+	if redisClient != nil {
+		healthHandler.SetRedisPinger(func(ctx context.Context) error {
+			return redisClient.Ping(ctx).Err()
+		})
+	}
 
 	router.GET("/health", healthHandler.Liveness)
 	router.GET("/ready", healthHandler.Readiness)
+	router.GET("/metrics", metrics.Handler())
 
 	// Keep the existing database health endpoint for compatibility.
 	router.GET("/api/v1/health/db", healthHandler.Readiness)

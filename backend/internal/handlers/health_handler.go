@@ -12,6 +12,7 @@ import (
 type HealthHandler struct {
 	db           *gorm.DB
 	pingDatabase func(context.Context) error
+	pingRedis    func(context.Context) error
 }
 
 func NewHealthHandler(db *gorm.DB) *HealthHandler {
@@ -25,6 +26,11 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 			return sqlDB.PingContext(ctx)
 		},
 	}
+}
+
+// SetRedisPinger configures the Redis health check probe for readiness evaluation.
+func (h *HealthHandler) SetRedisPinger(pinger func(context.Context) error) {
+	h.pingRedis = pinger
 }
 
 func (h *HealthHandler) Liveness(c *gin.Context) {
@@ -48,8 +54,25 @@ func (h *HealthHandler) Readiness(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	if h.pingRedis != nil {
+		if err := h.pingRedis(ctx); err != nil {
+			respondError(
+				c,
+				http.StatusServiceUnavailable,
+				"REDIS_UNAVAILABLE",
+				"Redis is unavailable",
+			)
+			return
+		}
+	}
+
+	resp := gin.H{
 		"status":   "ready",
 		"database": "ok",
-	})
+	}
+	if h.pingRedis != nil {
+		resp["redis"] = "ok"
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

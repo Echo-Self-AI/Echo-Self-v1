@@ -40,6 +40,20 @@ type Config struct {
 	JobMaxAttempts          int
 	JobLeaseDurationSeconds int
 	JobDrainTimeoutSeconds  int
+	WorkerHealthPort        string
+
+	// Deployment & Migration
+	AutoMigrate     bool
+	FrontendBaseURL string
+
+	// Email Delivery (SMTP)
+	SMTPEnabled  bool
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPUseTLS   bool
 }
 
 func Load() *Config {
@@ -56,8 +70,14 @@ func Load() *Config {
 		}
 	}
 
+	appEnv := getEnv("APP_ENV", "development")
+	defaultAutoMigrate := true
+	if appEnv == "production" {
+		defaultAutoMigrate = false
+	}
+
 	cfg := &Config{
-		AppEnv:      getEnv("APP_ENV", "development"),
+		AppEnv:      appEnv,
 		AppPort:     getEnv("APP_PORT", "8080"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		JWTSecret:   os.Getenv("JWT_SECRET"),
@@ -87,6 +107,20 @@ func Load() *Config {
 		JobMaxAttempts:          getEnvInt("JOB_MAX_ATTEMPTS", 3),
 		JobLeaseDurationSeconds: getEnvInt("JOB_LEASE_DURATION_SECONDS", 30),
 		JobDrainTimeoutSeconds:  getEnvInt("JOB_DRAIN_TIMEOUT_SECONDS", 10),
+		WorkerHealthPort:        getEnv("WORKER_HEALTH_PORT", "8081"),
+
+		// Deployment & Migration
+		AutoMigrate:     getEnvBool("AUTO_MIGRATE", defaultAutoMigrate),
+		FrontendBaseURL: getEnv("FRONTEND_BASE_URL", "http://localhost:3000"),
+
+		// Email Delivery
+		SMTPEnabled:  getEnvBool("SMTP_ENABLED", false),
+		SMTPHost:     os.Getenv("SMTP_HOST"),
+		SMTPPort:     getEnvInt("SMTP_PORT", 587),
+		SMTPUsername: os.Getenv("SMTP_USERNAME"),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:     getEnv("SMTP_FROM", "no-reply@echoself.ai"),
+		SMTPUseTLS:   getEnvBool("SMTP_USE_TLS", true),
 	}
 
 	return cfg

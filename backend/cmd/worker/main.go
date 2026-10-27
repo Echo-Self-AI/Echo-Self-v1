@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/config"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/database"
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/metrics"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/processor"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/queue"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
@@ -32,8 +35,10 @@ func main() {
 		log.Fatalf("database initialization failed: %v", err)
 	}
 
-	if err := database.Migrate(db); err != nil {
-		log.Fatalf("database migration failed: %v", err)
+	if cfg.AutoMigrate {
+		if err := database.Migrate(db); err != nil {
+			log.Fatalf("database migration failed: %v", err)
+		}
 	}
 
 	sqlDB, err := db.DB()
@@ -123,16 +128,73 @@ func main() {
 
 	workerEngine.Start(workerCtx)
 
+	// Worker Health & Metrics Probe Server (for container/k8s liveness & readiness)
+	probeMux := http.NewServeMux()
+	probeMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","service":"echoself-worker"}`))
+	})
+	probeMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := sqlDB.PingContext(ctx); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"error","database":"unavailable"}`))
+			return
+		}
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"error","redis":"unavailable"}`))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ready","database":"ok","redis":"ok"}`))
+	})
+	probeMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		output := metrics.DefaultRegistry.ExposePrometheus()
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(output))
+	})
+
+	probeServer := &http.Server{
+		Addr:              ":" + cfg.WorkerHealthPort,
+		Handler:           probeMux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		logger.Info("starting worker health & metrics probe", "addr", probeServer.Addr)
+		if err := probeServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("worker health probe server error", "error", err)
+		}
+	}()
+
 	// Handle graceful shutdown
 	signals := server.NotifyShutdown()
 	sig := <-signals
 	logger.Info("shutdown signal received", "signal", sig.String())
 
-	// Stop dispatcher and drain workers
+	// Graceful shutdown order:
+	// 1. Stop probe server
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer probeCancel()
+	_ = probeServer.Shutdown(probeCtx)
+
+	// 2. Stop outbox dispatcher
 	dispatcherCancel()
+
+	// 3. Stop claiming new jobs and drain active worker jobs
 	workerCancel()
 	workerEngine.Stop()
 
+	// 4. Close database pool
 	if closeErr := sqlDB.Close(); closeErr != nil {
 		logger.Error("database connection pool close failed", "error", closeErr)
 	}

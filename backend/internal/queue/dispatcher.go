@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/metrics"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 )
 
@@ -36,8 +37,10 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context, batchSize int) (int
 		batchSize = 50
 	}
 
+	start := time.Now()
 	events, err := d.repo.GetPendingOutbox(ctx, batchSize)
 	if err != nil {
+		metrics.DefaultRegistry.RecordOutboxDispatch("error", time.Since(start))
 		return 0, fmt.Errorf("fetch pending outbox: %w", err)
 	}
 
@@ -45,6 +48,7 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context, batchSize int) (int
 	for _, event := range events {
 		// Idempotently enqueue job ID to Redis
 		if err := d.queue.Enqueue(ctx, event.JobID); err != nil {
+			metrics.DefaultRegistry.RecordOutboxDispatch("error", time.Since(start))
 			d.logger.Error("failed to enqueue outbox event to redis",
 				"event_id", event.ID,
 				"job_id", event.JobID,
@@ -56,6 +60,7 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context, batchSize int) (int
 
 		now := time.Now().UTC()
 		if err := d.repo.MarkOutboxPublished(ctx, event.ID, now); err != nil {
+			metrics.DefaultRegistry.RecordOutboxDispatch("error", time.Since(start))
 			d.logger.Error("failed to mark outbox event published",
 				"event_id", event.ID,
 				"error", err,
@@ -64,6 +69,10 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context, batchSize int) (int
 		}
 
 		dispatched++
+	}
+
+	if dispatched > 0 {
+		metrics.DefaultRegistry.RecordOutboxDispatch("success", time.Since(start))
 	}
 
 	return dispatched, nil
@@ -98,6 +107,7 @@ func (d *OutboxDispatcher) Start(ctx context.Context, pollInterval time.Duration
 				d.logger.Warn("failed to recover orphaned queued jobs", "error", err)
 			} else if orphaned > 0 {
 				d.logger.Info("recovered orphaned queued jobs", "count", orphaned)
+				metrics.DefaultRegistry.RecordStaleJobRecovery()
 			}
 
 			// 2. Clean up published outbox records older than 24 hours

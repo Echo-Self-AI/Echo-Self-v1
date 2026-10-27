@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/metrics"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/processor"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/queue"
@@ -184,6 +185,7 @@ func (w *Worker) runConsumer(ctx context.Context, index int) {
 
 func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	jobLog := w.logger.With("job_id", jobID.String())
+	startTime := time.Now()
 
 	// 1. Conditionally claim the job lease in PostgreSQL with monotonic attempt generation
 	job, err := w.repo.ClaimJob(ctx, jobID, w.cfg.WorkerID, w.cfg.LeaseDuration)
@@ -198,6 +200,10 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 		return
 	}
 
+	if corrID, ok := job.Payload["correlation_id"].(string); ok && corrID != "" {
+		jobLog = jobLog.With("correlation_id", corrID)
+	}
+
 	jobLog.Info("claimed job for processing",
 		"attempt", job.AttemptCount,
 		"max_attempts", job.MaxAttempts,
@@ -208,6 +214,7 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	if job.Status == models.JobStatusCancelRequested || job.CancelRequestedAt != nil {
 		jobLog.Info("job cancellation requested, acknowledging cancellation")
 		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount)
+		metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusCancelled)
 		return
 	}
 
@@ -217,6 +224,7 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 		if err != nil || user == nil || user.DeletedAt.Valid {
 			jobLog.Warn("user account is inactive or deleted, aborting job")
 			_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "ACCOUNT_INACTIVE", "User account is deleted or inactive")
+			metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusFailed)
 			return
 		}
 	}
@@ -230,6 +238,7 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 			)
 			// Permanent failure: Consent not granted or revoked -> do NOT retry!
 			_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "CONSENT_REVOKED", "Consent not granted or revoked for this operation")
+			metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusFailed)
 			return
 		}
 	}
@@ -260,9 +269,11 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	if latest != nil && (latest.Status == models.JobStatusCancelRequested || latest.CancelRequestedAt != nil) {
 		jobLog.Info("cancellation acknowledged during processing completion")
 		_ = w.repo.AcknowledgeCancellation(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount)
+		metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusCancelled)
 		return
 	}
 
+	duration := time.Since(startTime)
 	// 6. Handle Outcome with fencing token validation
 	if err == nil {
 		// Succeeded: Persist result
@@ -270,6 +281,8 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 			jobLog.Error("failed to mark job succeeded in db (fencing or terminal conflict)", "error", err)
 		} else {
 			jobLog.Info("job succeeded")
+			metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusSucceeded)
+			metrics.DefaultRegistry.RecordJobDuration(job.JobType, duration)
 		}
 		return
 	}
@@ -280,6 +293,8 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	// Permanent failures: do NOT retry
 	if errors.Is(err, processor.ErrPermanentFailure) || errors.Is(err, processor.ErrUnsupportedJobType) {
 		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "PERMANENT_FAILURE", err.Error())
+		metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusFailed)
+		metrics.DefaultRegistry.RecordJobDuration(job.JobType, duration)
 		return
 	}
 
@@ -287,6 +302,8 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	if job.AttemptCount >= job.MaxAttempts {
 		jobLog.Error("job exceeded max attempts, marking failed", "attempts", job.AttemptCount)
 		_ = w.repo.MarkFailed(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, "MAX_ATTEMPTS_EXCEEDED", "Maximum retry attempts exceeded")
+		metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusFailed)
+		metrics.DefaultRegistry.RecordJobDuration(job.JobType, duration)
 		return
 	}
 
@@ -299,6 +316,8 @@ func (w *Worker) processJob(ctx context.Context, jobID uuid.UUID) {
 	)
 
 	_ = w.repo.ScheduleRetry(ctx, job.ID, w.cfg.WorkerID, job.AttemptCount, retryAt, "TRANSIENT_FAILURE", err.Error())
+	metrics.DefaultRegistry.RecordJobRetry(job.JobType)
+	metrics.DefaultRegistry.RecordJobState(job.JobType, models.JobStatusRetryWait)
 }
 
 func (w *Worker) heartbeatLease(
@@ -325,6 +344,7 @@ func (w *Worker) heartbeatLease(
 		case <-ticker.C:
 			if err := w.repo.RenewLease(ctx, jobID, w.cfg.WorkerID, attemptCount, w.cfg.LeaseDuration); err != nil {
 				w.logger.Warn("failed to renew job lease; aborting active processing context", "job_id", jobID, "error", err)
+				metrics.DefaultRegistry.RecordLeaseRenewalFailure()
 				cancel()
 				return
 			}
@@ -349,6 +369,7 @@ func (w *Worker) runStaleRecovery(ctx context.Context) {
 				w.logger.Error("stale job recovery error", "error", err)
 			} else if recovered > 0 {
 				w.logger.Info("recovered stale unfinished jobs", "count", recovered)
+				metrics.DefaultRegistry.RecordStaleJobRecovery()
 			}
 
 			// 2. Re-queue retry jobs whose backoff timestamp has expired

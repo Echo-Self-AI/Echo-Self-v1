@@ -161,3 +161,62 @@ func TestValidateWorkerConfiguration(t *testing.T) {
 		t.Fatalf("expected valid worker config, got %v", err)
 	}
 }
+
+func TestValidateProductionJWTSecret(t *testing.T) {
+	cfg := validConfig()
+	cfg.AppEnv = "production"
+	cfg.JWTSecret = "short-secret"
+	if err := cfg.Validate(); !errors.Is(err, ErrWeakJWTSecret) {
+		t.Fatalf("expected ErrWeakJWTSecret for short secret in production, got %v", err)
+	}
+
+	cfg.JWTSecret = "this-is-a-very-secure-production-jwt-secret-with-32-plus-characters"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid production config with strong secret, got %v", err)
+	}
+}
+
+func TestValidateSMTPConfiguration(t *testing.T) {
+	cfg := validConfig()
+	cfg.SMTPEnabled = true
+
+	// Missing host
+	cfg.SMTPHost = ""
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidSMTPConfig) {
+		t.Fatalf("expected ErrInvalidSMTPConfig for missing host, got %v", err)
+	}
+
+	// Invalid port
+	cfg.SMTPHost = "smtp.example.com"
+	cfg.SMTPPort = 0
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidSMTPConfig) {
+		t.Fatalf("expected ErrInvalidSMTPConfig for port 0, got %v", err)
+	}
+
+	// Missing from address
+	cfg.SMTPPort = 587
+	cfg.SMTPFrom = ""
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidSMTPConfig) {
+		t.Fatalf("expected ErrInvalidSMTPConfig for missing from address, got %v", err)
+	}
+
+	cfg.SMTPFrom = "no-reply@echoself.ai"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid SMTP config, got %v", err)
+	}
+}
+
+func TestValidateFrontendBaseURL(t *testing.T) {
+	cfg := validConfig()
+
+	// Invalid URL scheme
+	cfg.FrontendBaseURL = "ftp://invalid.com"
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidFrontendURL) {
+		t.Fatalf("expected ErrInvalidFrontendURL for ftp scheme, got %v", err)
+	}
+
+	cfg.FrontendBaseURL = "https://app.echoself.ai"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config with https frontend URL, got %v", err)
+	}
+}

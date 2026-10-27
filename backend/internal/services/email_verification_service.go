@@ -3,8 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/email"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/google/uuid"
@@ -18,8 +22,10 @@ var (
 const emailVerificationTokenTTL = 24 * time.Hour
 
 type EmailVerificationService struct {
-	users         *repositories.UserRepository
-	verifications *repositories.EmailVerificationRepository
+	users           *repositories.UserRepository
+	verifications   *repositories.EmailVerificationRepository
+	sender          email.Sender
+	frontendBaseURL string
 }
 
 func NewEmailVerificationService(
@@ -30,6 +36,12 @@ func NewEmailVerificationService(
 		users:         users,
 		verifications: verifications,
 	}
+}
+
+// SetEmailSender configures the transactional email sender and frontend URL for verification links.
+func (s *EmailVerificationService) SetEmailSender(sender email.Sender, frontendBaseURL string) {
+	s.sender = sender
+	s.frontendBaseURL = strings.TrimRight(frontendBaseURL, "/")
 }
 
 func (s *EmailVerificationService) CreateToken(
@@ -61,6 +73,20 @@ func (s *EmailVerificationService) CreateToken(
 
 	if err := s.verifications.Create(ctx, verification); err != nil {
 		return "", err
+	}
+
+	if s.sender != nil && user.Email != "" {
+		verifyURL := fmt.Sprintf("%s/verify-email?token=%s", s.frontendBaseURL, rawToken)
+		msg := email.Message{
+			To:       user.Email,
+			Subject:  "Verify your EchoSelf account",
+			TextBody: fmt.Sprintf("Welcome to EchoSelf!\n\nPlease verify your email by opening the following link:\n%s\n\nThis link will expire in 24 hours.", verifyURL),
+			HTMLBody: fmt.Sprintf("<p>Welcome to EchoSelf!</p><p>Please verify your email by clicking the link below:</p><p><a href=\"%s\">Verify Email</a></p><p>This link will expire in 24 hours.</p>", verifyURL),
+		}
+		if err := s.sender.Send(ctx, msg); err != nil {
+			slog.ErrorContext(ctx, "failed to send verification email", "component", "email_verification", "error", err)
+			return "", fmt.Errorf("send verification email: %w", err)
+		}
 	}
 
 	return rawToken, nil

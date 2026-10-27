@@ -3,8 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/email"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/models"
 	"github.com/Echo-Self-AI/Echo-Self-v1/backend/internal/repositories"
 	"github.com/google/uuid"
@@ -19,8 +23,10 @@ var (
 const passwordResetTokenTTL = 30 * time.Minute
 
 type PasswordResetService struct {
-	users  *repositories.UserRepository
-	resets *repositories.PasswordResetRepository
+	users           *repositories.UserRepository
+	resets          *repositories.PasswordResetRepository
+	sender          email.Sender
+	frontendBaseURL string
 }
 
 func NewPasswordResetService(
@@ -33,11 +39,17 @@ func NewPasswordResetService(
 	}
 }
 
+// SetEmailSender configures the transactional email sender and frontend URL for reset links.
+func (s *PasswordResetService) SetEmailSender(sender email.Sender, frontendBaseURL string) {
+	s.sender = sender
+	s.frontendBaseURL = strings.TrimRight(frontendBaseURL, "/")
+}
+
 func (s *PasswordResetService) CreateToken(
 	ctx context.Context,
-	email string,
+	emailAddress string,
 ) (string, error) {
-	user, err := s.users.FindByEmail(ctx, email)
+	user, err := s.users.FindByEmail(ctx, emailAddress)
 	if err != nil {
 		return "", err
 	}
@@ -65,6 +77,20 @@ func (s *PasswordResetService) CreateToken(
 
 	if err := s.resets.Create(ctx, reset); err != nil {
 		return "", err
+	}
+
+	if s.sender != nil && user.Email != "" {
+		resetURL := fmt.Sprintf("%s/reset-password?token=%s", s.frontendBaseURL, rawToken)
+		msg := email.Message{
+			To:       user.Email,
+			Subject:  "Reset your EchoSelf password",
+			TextBody: fmt.Sprintf("A password reset was requested for your EchoSelf account.\n\nReset your password by opening the following link:\n%s\n\nThis link will expire in 30 minutes. If you did not request this, please ignore this email.", resetURL),
+			HTMLBody: fmt.Sprintf("<p>A password reset was requested for your EchoSelf account.</p><p>Reset your password by clicking the link below:</p><p><a href=\"%s\">Reset Password</a></p><p>This link will expire in 30 minutes. If you did not request this, please ignore this email.</p>", resetURL),
+		}
+		if err := s.sender.Send(ctx, msg); err != nil {
+			slog.ErrorContext(ctx, "failed to send password reset email", "component", "password_reset", "error", err)
+			return "", fmt.Errorf("send password reset email: %w", err)
+		}
 	}
 
 	return rawToken, nil
