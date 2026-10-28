@@ -1,0 +1,11 @@
+{
+  "name": "tiny_corpus",
+  "version": "0.1.0",
+  "source": "Local EchoSelf synthetic corpus",
+  "license": "Apache-2.0",
+  "num_characters": 191,
+  "num_lines": 8,
+  "sha256": "486d8c361f08a1c1df27f751247823f291ad861fd03ac18ea450a6801bf60acc",
+  "description": "Baseline synthetic smoke testing corpus",
+  "is_synthetic": true
+}
