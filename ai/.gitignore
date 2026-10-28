@@ -32,3 +32,8 @@ data/processed/*
 # Experiments runtime output
 experiments/*
 !experiments/.gitkeep
+
+# Voice consent storage
+data/consent/*
+!data/consent/.gitkeep
+
