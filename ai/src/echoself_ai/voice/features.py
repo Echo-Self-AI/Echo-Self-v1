@@ -127,3 +127,23 @@ class LogMelSpectrogram(nn.Module):
         log_mel = torch.log(torch.clamp(mel_spectrogram, min=1e-5))
 
         return log_mel
+
+
+def extract_log_mel_spectrogram(
+    waveform: torch.Tensor,
+    sample_rate: int = 16000,
+    n_mels: int = 80,
+    n_fft: int = 512,
+    hop_length: int = 128,
+    win_length: int = 512,
+) -> torch.Tensor:
+    """Convenience helper to extract log-mel spectrogram features from a waveform tensor."""
+    extractor = LogMelSpectrogram(
+        sample_rate=sample_rate,
+        n_mels=n_mels,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length,
+    )
+    return extractor(waveform).squeeze(0)
+

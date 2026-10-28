@@ -17,7 +17,11 @@ from echoself_ai.voice.audio import (
     write_wav,
 )
 from echoself_ai.voice.consent import VoiceConsentManager, VoiceConsentRecord
-from echoself_ai.voice.features import LogMelSpectrogram, create_mel_filterbank
+from echoself_ai.voice.features import (
+    LogMelSpectrogram,
+    create_mel_filterbank,
+    extract_log_mel_spectrogram,
+)
 from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 
 __all__ = [
@@ -36,6 +40,7 @@ __all__ = [
     "VoiceConsentRecord",
     "VoiceSynthesizer",
     "create_mel_filterbank",
+    "extract_log_mel_spectrogram",
     "generate_synthetic_tone",
     "ingest_audio",
     "load_wav",

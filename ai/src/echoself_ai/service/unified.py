@@ -30,11 +30,13 @@ from echoself_ai.vision.avatar import (
     VisualConsentManager,
 )
 from echoself_ai.vision.encoder import VisualEncoder, VisualEncoderConfig
-from echoself_ai.vision.image_ops import tensor_to_pil
+from echoself_ai.vision.image_ops import ingest_image, tensor_to_pil
 from echoself_ai.voice.acoustic_model import AcousticModel, AcousticModelConfig
-from echoself_ai.voice.audio import save_wav
+from echoself_ai.voice.audio import ingest_audio, save_wav
 from echoself_ai.voice.consent import VoiceConsentManager
+from echoself_ai.voice.features import extract_log_mel_spectrogram
 from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
+
 
 
 
@@ -347,15 +349,29 @@ class EchoSelfAIService:
         }
 
     def _handle_voice_embedding(self, req: ProcessRequest) -> dict[str, Any]:
-        # Synthesize or extract voice feature vector
         speaker_id = req.payload.get("speaker_id", "default")
-        hasher = __import__("hashlib").sha512(f"{req.user_id}:{speaker_id}".encode("utf-8"))
-        digest = hasher.digest()
-        # Create deterministic normalized 64-d speaker embedding
-        raw_vals = [float(b) / 127.5 - 1.0 for b in digest[:64]]
-        norm = sum(v * v for v in raw_vals) ** 0.5 or 1.0
-        embedding = [v / norm for v in raw_vals]
+        audio_path = req.payload.get("audio_path")
+        audio_b64 = req.payload.get("audio_base64")
 
+        # Ingest real audio if provided
+        if audio_path or audio_b64:
+            source = audio_path if audio_path else base64.b64decode(audio_b64)
+            waveform, sr = ingest_audio(source, target_sr=16000)
+            # Extract 80-channel log-mel features
+            mel = extract_log_mel_spectrogram(waveform, sample_rate=sr, n_mels=80)
+            # Extract 64-d acoustic identity representation via mean and std pooling over first 32 mel bands
+            mean_mel = mel[:32].mean(dim=-1)
+            std_mel = mel[:32].std(dim=-1)
+            raw_feat = torch.cat([mean_mel, std_mel], dim=-1)
+            norm_feat = torch.nn.functional.normalize(raw_feat, p=2, dim=-1)
+            embedding = norm_feat.tolist()
+        else:
+            # Deterministic pseudo-embedding fallback when no raw audio input is provided
+            hasher = __import__("hashlib").sha512(f"{req.user_id}:{speaker_id}".encode("utf-8"))
+            digest = hasher.digest()
+            raw_vals = [float(b) / 127.5 - 1.0 for b in digest[:64]]
+            norm = sum(v * v for v in raw_vals) ** 0.5 or 1.0
+            embedding = [v / norm for v in raw_vals]
 
         return {
             "speaker_id": speaker_id,
@@ -400,11 +416,20 @@ class EchoSelfAIService:
         }
 
     def _handle_avatar_embedding(self, req: ProcessRequest) -> dict[str, Any]:
-        # Deterministic or extracted visual embedding
         avatar_id = req.payload.get("avatar_id", "avatar")
-        dummy_img = torch.randn(1, 3, 64, 64, device=self.device).clamp(-1.0, 1.0)
-        with torch.no_grad():
-            emb = self.visual_encoder(dummy_img).squeeze(0)
+        img_path = req.payload.get("image_path")
+        img_b64 = req.payload.get("image_base64")
+
+        if img_path or img_b64:
+            source = img_path if img_path else base64.b64decode(img_b64)
+            img_tensor = ingest_image(source, target_size=(64, 64))
+            img_tensor = img_tensor.unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                emb = self.visual_encoder(img_tensor).squeeze(0)
+        else:
+            dummy_img = torch.randn(1, 3, 64, 64, device=self.device).clamp(-1.0, 1.0)
+            with torch.no_grad():
+                emb = self.visual_encoder(dummy_img).squeeze(0)
 
         return {
             "avatar_id": avatar_id,
