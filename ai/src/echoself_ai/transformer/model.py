@@ -144,3 +144,25 @@ class TransformerLanguageModel(nn.Module):
         if non_embedding:
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
+
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt_tokens: torch.Tensor,
+        max_new_tokens: int = 100,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None,
+        eos_id: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Autoregressively generate tokens from prompt_tokens."""
+        from echoself_ai.transformer.generation import generate
+
+        return generate(
+            self,
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            eos_id=eos_id,
+        )
+
