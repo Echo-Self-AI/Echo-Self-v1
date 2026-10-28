@@ -1,4 +1,5 @@
 """Visual AI and avatar subsystem for EchoSelf."""
+from echoself_ai.vision.encoder import VisualEncoder, VisualEncoderConfig
 from echoself_ai.vision.image_ops import (
     ImageConfig,
     generate_synthetic_image,
@@ -9,6 +10,8 @@ from echoself_ai.vision.image_ops import (
 
 __all__ = [
     "ImageConfig",
+    "VisualEncoder",
+    "VisualEncoderConfig",
     "generate_synthetic_image",
     "load_image",
     "save_image",

@@ -45,9 +45,10 @@ This document tracks all phases, microsteps, criteria, and execution status.
 
 ### Phase 4: Visual AI and Avatars
 - [x] **P4-M01**: Image I/O, resizing, normalization, and synthetic image generators (`src/echoself_ai/vision/image_ops.py`, `tests/test_image_ops.py`).
-- [ ] **P4-M02**: Visual Feature Extractor & Representation Network from scratch (`src/echoself_ai/vision/encoder.py`).
+- [x] **P4-M02**: Visual Feature Extractor & Representation Network from scratch (`src/echoself_ai/vision/encoder.py`, `tests/test_visual_encoder.py`).
 - [ ] **P4-M03**: Avatar Identity & Representation Engine with consent gating (`src/echoself_ai/vision/avatar.py`).
 - [ ] **P4-M04**: Visual evaluation pipeline, image metrics, and documentation (`docs/VISION.md`).
+
 
 
 
