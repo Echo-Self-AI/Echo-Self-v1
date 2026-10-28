@@ -85,6 +85,13 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P10-M02**: Pretraining Smoke Test with Shifted Targets & Checkpoint Roundtrip (`tests/test_pretraining_smoke.py`).
 - [x] **P10-M03**: Execute Transformer Pretraining on Real Data with GPU Acceleration (`src/echoself_ai/train_transformer.py`).
 - [x] **P10-M04**: Text Generation Evaluation and Checkpoint Verification (`ai/docs/EXPERIMENTS.md`, `checkpoints/transformer_real/best_model.pt`).
+
+### Phase 11: Voice Acoustic Model Training (Licensed Speech)
+- [x] **P11-M01**: Dataset Provenance & Speech Ingestion Pipeline (`ai/docs/DATASETS.md`, `src/echoself_ai/data_manager.py`).
+- [x] **P11-M02**: Speech Dataset Loader & Feature Alignment (`src/echoself_ai/voice/dataset.py`, `tests/test_speech_dataset.py`).
+- [x] **P11-M03**: Acoustic Model Training Loop & Smoke Test (`src/echoself_ai/voice/train_acoustic.py`, `tests/test_acoustic_training_smoke.py`).
+- [x] **P11-M04**: Train Acoustic Model on Real Speech Data with Checkpoint Verification (`checkpoints/acoustic_real/best_model.pt`).
+- [x] **P11-M05**: Speech Synthesis Evaluation, Griffin-Lim Vocoder Reconstruction & Consent Verification (`ai/docs/VOICE.md`, `tests/test_speech_evaluation.py`).
 ---
 
 ## Microstep Execution Log

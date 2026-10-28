@@ -158,7 +158,8 @@ class VoiceSynthesizer:
                 consent_manager=self.consent_manager if raw_speaker_id else None,
             )
             waveform = self.vocoder(predicted_mel)
-
+            from echoself_ai.voice.audio import normalize_waveform
+            waveform = normalize_waveform(waveform, target_peak=0.95)
 
         if output_wav_path is not None:
             write_wav(output_wav_path, waveform[0], self.vocoder.sample_rate)

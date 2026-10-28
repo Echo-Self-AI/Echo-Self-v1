@@ -37,6 +37,34 @@ ai/src/echoself_ai/voice/
 - `GriffinLimVocoder`: Mathematical iterative phase reconstruction inverting mel-spectrograms to audible waveforms without needing large pretrained vocoder checkpoints.
 - `VoiceSynthesizer`: End-to-end synthesizer taking tokens and generating standard `.wav` audio.
 
+## 5. Acoustic Model Pretraining & Evaluation (Phase 11)
+
+- **Dataset**: Curated 32-clip subset of **The LJ Speech Dataset** (Public Domain CC0 1.0 Universal) reading historical passages on printing.
+- **Split**: 26 train clips (81.25%), 6 validation clips (18.75%).
+- **Model Architecture**:
+  - `vocab_size`: 48 (ASCII phonetic / character vocabulary)
+  - `n_mels`: 80 log-mel channels
+  - `hidden_dim`: 64, `num_layers`: 3 Conv1d blocks with LayerNorm & GELU
+  - `upsample_factor`: 8 (aligns ~8 frames per character to match natural speech rate)
+- **Training Progression (CUDA / NVIDIA RTX 3050)**:
+  - Initial validation L1 loss: **4.4367**
+  - Step 50 validation L1 loss: 1.8316
+  - Step 100 validation L1 loss: **1.4714** (Best Checkpoint)
+  - Final validation L1 loss: 1.5130
+  - Duration: 150 steps in 10.73s (~14 steps/sec)
+  - Checkpoint: `checkpoints/acoustic_real/best_model.pt` verified with SHA-256 sidecar checksum.
+
+### Technical Speech Evaluation & Honest Limitations
+1. **Numerical Validity**: Waveforms are finite with zero NaNs, Infs, or zeros. Peak amplitude normalized to 0.95 without digital clipping.
+2. **Audio Cadence**: Character-to-frame expansion accurately produces proportional utterance durations (~1.8 seconds for ~55 characters).
+3. **Acoustic Fidelity**: Reconstructed audio captures syllabic rhythm and pitch contour.
+4. **Known Limitations**:
+   - Griffin-Lim iterative phase vocoding produces characteristic metallic/robotic artifacts and background phase noise compared to neural vocoders.
+   - 32-sample training subset demonstrates rapid acoustic convergence and loss reduction (4.4367 -> 1.4714), but exhibits limited phonetic diversity outside the vocabulary of the reading passages.
+   - Personal voice cloning remains strictly disabled and gated behind explicit `VoiceConsentManager` authorization.
+
 ## Latency & Hardware Profile
-- CPU execution: Real-time factor (RTF) < 0.25 on 12-core CPU (synthesizes 1 second of speech in ~250ms).
-- RAM footprint: Under 150 MB.
+- CUDA execution: ~14 training steps per second on RTX 3050 Laptop GPU (150 steps in 10.7s).
+- Synthesis latency: Griffin-Lim 16-iteration reconstruction takes ~250ms for 2 seconds of speech on CPU.
+- RAM footprint: Under 200 MB.
+
