@@ -67,9 +67,11 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P7-M03**: Cross-Language End-to-End Integration Test (`backend/internal/processor/integration_test.go`, `ai/tests/test_go_bridge.py`).
 - [x] **P7-M04**: Integration Documentation & Protocol Specification (`docs/INTEGRATION.md`, `ai/docs/INTEGRATION.md`).
 
-
-
-
+### Phase 8: Quality, Security & Operational Hardening
+- [x] **P8-M01**: Input Validation, Safety & Prompt Injection Sanitization (`src/echoself_ai/security/sanitizer.py`, `tests/test_sanitizer.py`).
+- [ ] **P8-M02**: Model Checkpoint Integrity & Tamper Verification (`src/echoself_ai/security/integrity.py`, `tests/test_integrity.py`).
+- [ ] **P8-M03**: Resource Governance, Rate Limiting & Memory Watchdog (`src/echoself_ai/security/watchdog.py`, `tests/test_watchdog.py`).
+- [ ] **P8-M04**: Full System Audit, Security Documentation & Operational Runbook (`docs/SECURITY.md`).
 ---
 
 ## Microstep Execution Log

@@ -13,7 +13,9 @@ import uuid
 
 import torch
 
+from echoself_ai.security.sanitizer import InputSanitizer
 from echoself_ai.tokenizer import CharacterTokenizer
+
 from echoself_ai.transformer.config import TransformerConfig
 from echoself_ai.transformer.generation import generate
 from echoself_ai.transformer.model import TransformerLanguageModel
@@ -100,11 +102,13 @@ class EchoSelfAIService:
         self.consent_dir = consent_dir or Path("data/consent")
         self.checkpoints_dir = checkpoints_dir or Path("checkpoints")
 
-        # Consent Managers
+        # Consent Managers & Sanitizer
         self.voice_consent = VoiceConsentManager(storage_dir=self.consent_dir / "voice")
         self.visual_consent = VisualConsentManager(storage_dir=self.consent_dir / "visual")
+        self.sanitizer = InputSanitizer()
 
         # Initialize core models
+
         self._init_language_model()
         self._init_voice_model()
         self._init_vision_model()
@@ -189,6 +193,26 @@ class EchoSelfAIService:
                 metadata={"execution_time_ms": (time.perf_counter() - t0) * 1000.0},
             )
 
+        # Sanitize payload & check for prompt injection / security issues
+        sanitized_payload, flags = self.sanitizer.sanitize_payload(req.job_type, req.payload)
+        if "prompt_injection_pattern_detected" in flags:
+            return ProcessResult(
+                job_id=req.job_id,
+                status="failed",
+                error="Request blocked: security policy violation (prompt injection pattern detected)",
+                metadata={
+                    "execution_time_ms": (time.perf_counter() - t0) * 1000.0,
+                    "security_flags": flags,
+                },
+            )
+
+        req = ProcessRequest(
+            job_id=req.job_id,
+            job_type=req.job_type,
+            payload=sanitized_payload,
+            user_id=req.user_id,
+        )
+
         try:
             handler = getattr(self, f"_handle_{req.job_type}", None)
             if not handler:
@@ -206,14 +230,18 @@ class EchoSelfAIService:
             output = handler(req)
             latency_ms = (time.perf_counter() - t0) * 1000.0
 
+            meta = {
+                "execution_time_ms": latency_ms,
+                "device": str(self.device),
+            }
+            if flags:
+                meta["security_flags"] = flags
+
             return ProcessResult(
                 job_id=req.job_id,
                 status="success",
                 output=output,
-                metadata={
-                    "execution_time_ms": latency_ms,
-                    "device": str(self.device),
-                },
+                metadata=meta,
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
