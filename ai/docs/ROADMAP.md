@@ -22,8 +22,9 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P0-M01**: Repository audit, hardware verification, baseline tests (15/15 passing), `.gitignore` configuration, dependency locking (`pytest` in `pyproject.toml`), and documentation.
 
 ### Phase 1: Language Model Foundation (Decoder-Only Transformer)
-- [ ] **P1-M01**: Transformer configuration, reproducibility utilities, and device detection (`src/echoself_ai/transformer/config.py`).
+- [x] **P1-M01**: Transformer configuration, reproducibility utilities, and device detection (`src/echoself_ai/transformer/config.py`).
 - [ ] **P1-M02**: Causal self-attention, multi-head attention, and masking primitives (`src/echoself_ai/transformer/attention.py`) with unit tests.
+
 - [ ] **P1-M03**: Feed-forward network, layer normalization, residual blocks, and full Transformer architecture (`src/echoself_ai/transformer/model.py`) with unit tests.
 - [ ] **P1-M04**: Autoregressive text generation with temperature and top-k sampling (`src/echoself_ai/transformer/generation.py`) with unit tests.
 - [ ] **P1-M05**: Training engine with evaluation, gradient clipping, metrics tracking, and safe checkpoint save/load (`src/echoself_ai/training/trainer.py`).
