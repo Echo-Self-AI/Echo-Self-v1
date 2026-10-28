@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "echoself-ai"
+version = "0.1.0"
+description = "EchoSelf AI training and experimentation"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.4",
+    "torch",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/echoself_ai"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

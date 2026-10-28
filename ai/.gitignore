@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Checkpoints (ignore all trained checkpoints by default to prevent large files in git; preserve baseline bigram.pt)
+checkpoints/*.pt
+!checkpoints/bigram.pt
+!checkpoints/.gitkeep
+
+# Processed data caches
+data/processed/*
+!data/processed/.gitkeep
+
+# Experiments runtime output
+experiments/*
+!experiments/.gitkeep
