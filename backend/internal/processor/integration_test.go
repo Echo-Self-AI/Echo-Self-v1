@@ -3,16 +3,19 @@ package processor
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
 
 // getFreePort asks the kernel for a free open TCP port.
 func getFreePort(t *testing.T) int {
@@ -52,8 +55,9 @@ func TestE2E_GoToPythonAIService(t *testing.T) {
 		"--device", "cpu",
 	)
 	cmd.Dir = aiDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		t.Skipf("unable to launch Python AI service via uv: %v", err)
@@ -61,10 +65,12 @@ func TestE2E_GoToPythonAIService(t *testing.T) {
 
 	defer func() {
 		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}
 	}()
+
 
 	// Wait for server to become healthy (up to 10 seconds)
 	httpClient := &http.Client{Timeout: 2 * time.Second}
