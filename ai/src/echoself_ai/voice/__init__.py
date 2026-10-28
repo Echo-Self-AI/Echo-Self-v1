@@ -17,6 +17,12 @@ from echoself_ai.voice.audio import (
     write_wav,
 )
 from echoself_ai.voice.consent import VoiceConsentManager, VoiceConsentRecord
+from echoself_ai.voice.dataset import (
+    SpeechDataset,
+    SpeechItem,
+    SpeechVocab,
+    collate_speech_batch,
+)
 from echoself_ai.voice.features import (
     LogMelSpectrogram,
     create_mel_filterbank,
@@ -27,6 +33,10 @@ from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 __all__ = [
     "AcousticModel",
     "AcousticModelConfig",
+    "SpeechDataset",
+    "SpeechItem",
+    "SpeechVocab",
+    "collate_speech_batch",
     "AudioConfig",
     "AudioDurationError",
     "AudioFileSizeError",
