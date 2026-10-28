@@ -16,6 +16,12 @@ from echoself_ai.vision.image_ops import (
     save_image,
     tensor_to_pil,
 )
+from echoself_ai.vision.metrics import (
+    compute_mse,
+    compute_psnr,
+    compute_ssim,
+    evaluate_avatar_generation,
+)
 
 __all__ = [
     "AvatarGenerator",
@@ -28,9 +34,14 @@ __all__ = [
     "VisualEncoder",
     "VisualEncoderConfig",
     "compute_identity_consistency_loss",
+    "compute_mse",
+    "compute_psnr",
+    "compute_ssim",
+    "evaluate_avatar_generation",
     "generate_synthetic_image",
     "load_image",
     "save_image",
     "tensor_to_pil",
 ]
+
 
