@@ -1,4 +1,7 @@
+"""WAV audio file I/O, format validation, resampling, and normalization."""
+import base64
 from dataclasses import dataclass
+from io import BytesIO
 import math
 from pathlib import Path
 import struct
@@ -6,16 +9,56 @@ from typing import Any, Optional, Union
 import wave
 
 import torch
+import torch.nn.functional as F
 
+
+# -----------------------------------------------------------------------------
+# Validation Error Taxonomy
+# -----------------------------------------------------------------------------
+
+class MediaValidationError(ValueError):
+    """Base exception for all media validation failures."""
+    pass
+
+
+class AudioValidationError(MediaValidationError):
+    """Base exception for audio-specific validation failures."""
+    pass
+
+
+class InvalidAudioFormatError(AudioValidationError):
+    """Raised when an audio file has an unsupported container, header, or bit-depth."""
+    pass
+
+
+class AudioDurationError(AudioValidationError):
+    """Raised when an audio recording is shorter or longer than allowable limits."""
+    pass
+
+
+class AudioFileSizeError(AudioValidationError):
+    """Raised when an audio file exceeds safety size thresholds."""
+    pass
+
+
+class CorruptAudioError(AudioValidationError):
+    """Raised when an audio file is truncated, contains NaNs, or has malformed data chunks."""
+    pass
+
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
 
 @dataclass
 class AudioConfig:
     """Standardized audio processing configuration."""
 
     sample_rate: int = 16000
-    max_duration_seconds: float = 30.0
+    max_duration_seconds: float = 60.0
     min_duration_seconds: float = 0.1
-    normalize_amplitude: bool = True
+    max_file_size_bytes: int = 25 * 1024 * 1024  # 25 MB safety ceiling
+    normalize_amplitude: bool = False
 
     def __post_init__(self) -> None:
         if self.sample_rate < 8000:
@@ -26,71 +69,184 @@ class AudioConfig:
             raise ValueError("max_duration_seconds must be greater than min_duration_seconds")
 
 
-def load_wav(path: str | Path, config: Optional[AudioConfig] = None) -> tuple[torch.Tensor, int]:
-    """Load a 16-bit PCM WAV file into a normalized 1D float32 PyTorch tensor.
+# -----------------------------------------------------------------------------
+# Resampling
+# -----------------------------------------------------------------------------
 
-    Converts multichannel audio to mono by averaging channels.
+def resample_waveform(waveform: torch.Tensor, orig_sr: int, target_sr: int = 16000) -> torch.Tensor:
+    """Resample 1D waveform tensor to target sample rate using linear interpolation."""
+    if orig_sr == target_sr:
+        return waveform
+
+    orig_dim = waveform.dim()
+    if orig_dim == 1:
+        x = waveform.view(1, 1, -1)
+    elif orig_dim == 2:
+        x = waveform.unsqueeze(1)
+    else:
+        raise ValueError(f"Expected 1D or 2D waveform tensor, got shape {waveform.shape}")
+
+    new_len = max(1, int(round(x.shape[-1] * (target_sr / orig_sr))))
+    new_x = F.interpolate(x, size=new_len, mode="linear", align_corners=False)
+
+    if orig_dim == 1:
+        return new_x.squeeze(0).squeeze(0)
+    return new_x.squeeze(1)
+
+
+# -----------------------------------------------------------------------------
+# Validation & Ingestion
+# -----------------------------------------------------------------------------
+
+def ingest_audio(
+    source: Union[str, Path, bytes, BytesIO],
+    config: Optional[AudioConfig] = None,
+    target_sr: int = 16000,
+) -> tuple[torch.Tensor, int]:
+    """Ingest, validate, downmix, and standardize an input WAV audio recording.
+
+    Accepts file paths, raw bytes, or BytesIO buffers. Validates headers, bit depth,
+    duration, file size, and numerical finiteness.
 
     Returns:
-        waveform: Tensor of shape (num_samples,) with values in [-1.0, 1.0].
-        sample_rate: Detected sampling rate.
+        waveform: 1D float32 PyTorch tensor in [-1.0, 1.0] resampled to target_sr.
+        sample_rate: Output sample rate (equal to target_sr).
     """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Audio file not found: {path}")
+    cfg = config or AudioConfig(sample_rate=target_sr)
 
-    with wave.open(str(path), "rb") as wf:
-        n_channels = wf.getnchannels()
-        sampwidth = wf.getsampwidth()
-        sample_rate = wf.getframerate()
-        n_frames = wf.getnframes()
+    # Resolve byte buffer or file
+    if isinstance(source, (str, Path)):
+        p = Path(source)
+        if not p.is_file():
+            raise FileNotFoundError(f"Audio file not found: {p}")
+        file_size = p.stat().st_size
+        if file_size > cfg.max_file_size_bytes:
+            raise AudioFileSizeError(
+                f"Audio file size ({file_size} bytes) exceeds safety limit {cfg.max_file_size_bytes} bytes"
+            )
+        if file_size < 44:  # Smallest valid RIFF WAV header is 44 bytes
+            raise CorruptAudioError(f"Audio file too small ({file_size} bytes) to contain a valid WAV header")
+        bio = open(p, "rb")
+        needs_close = True
+    elif isinstance(source, bytes):
+        if len(source) > cfg.max_file_size_bytes:
+            raise AudioFileSizeError(
+                f"Audio byte buffer ({len(source)} bytes) exceeds safety limit {cfg.max_file_size_bytes} bytes"
+            )
+        if len(source) < 44:
+            raise CorruptAudioError(f"Audio buffer too small ({len(source)} bytes) to contain a valid WAV header")
+        bio = BytesIO(source)
+        needs_close = False
+    elif isinstance(source, BytesIO):
+        source.seek(0, 2)
+        size = source.tell()
+        source.seek(0)
+        if size > cfg.max_file_size_bytes:
+            raise AudioFileSizeError(
+                f"Audio stream ({size} bytes) exceeds safety limit {cfg.max_file_size_bytes} bytes"
+            )
+        if size < 44:
+            raise CorruptAudioError(f"Audio stream too small ({size} bytes) to contain a valid WAV header")
+        bio = source
+        needs_close = False
+    else:
+        raise InvalidAudioFormatError(f"Unsupported audio source type: {type(source).__name__}")
 
-        if sampwidth != 2:
-            raise ValueError(
-                f"Unsupported bit depth: expected 16-bit PCM (sampwidth=2), got sampwidth={sampwidth}"
+    try:
+        try:
+            wf = wave.open(bio, "rb")
+        except wave.Error as exc:
+            raise InvalidAudioFormatError(f"Malformed or non-WAV audio container: {exc}") from exc
+        except (EOFError, struct.error) as exc:
+            raise CorruptAudioError(f"Corrupt WAV chunk structure: {exc}") from exc
+
+        with wf:
+            n_channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            in_sr = wf.getframerate()
+            n_frames = wf.getnframes()
+
+            if n_channels < 1:
+                raise CorruptAudioError("Audio reports 0 channels")
+
+            if sampwidth != 2:
+                raise InvalidAudioFormatError(
+                    f"Unsupported bit depth: expected 16-bit Linear PCM (sampwidth=2), got sampwidth={sampwidth}"
+                )
+
+            if in_sr < 8000 or in_sr > 96000:
+                raise InvalidAudioFormatError(
+                    f"Sample rate {in_sr} Hz outside supported range [8000, 96000] Hz"
+                )
+
+            if n_frames == 0:
+                raise CorruptAudioError("Audio file contains 0 audio frames")
+
+            raw_bytes = wf.readframes(n_frames)
+            expected_bytes = n_frames * n_channels * sampwidth
+            if len(raw_bytes) != expected_bytes:
+                raise CorruptAudioError(
+                    f"Truncated WAV file: expected {expected_bytes} bytes, received {len(raw_bytes)}"
+                )
+
+        num_samples = n_frames * n_channels
+        fmt = f"<{num_samples}h"
+        try:
+            ints = struct.unpack(fmt, raw_bytes)
+        except struct.error as exc:
+            raise CorruptAudioError(f"Failed to unpack PCM sample bytes: {exc}") from exc
+
+        tensor = torch.tensor(ints, dtype=torch.float32) / 32768.0
+
+        if not torch.isfinite(tensor).all():
+            raise CorruptAudioError("Audio contains non-finite (NaN or Inf) sample values")
+
+        # Downmix multichannel to mono
+        if n_channels > 1:
+            tensor = tensor.view(-1, n_channels).mean(dim=1)
+
+        raw_duration = len(tensor) / float(in_sr)
+        if raw_duration < cfg.min_duration_seconds:
+            raise AudioDurationError(
+                f"Audio duration {raw_duration:.2f}s is less than minimum allowable {cfg.min_duration_seconds}s"
+            )
+        if raw_duration > cfg.max_duration_seconds:
+            raise AudioDurationError(
+                f"Audio duration {raw_duration:.2f}s exceeds maximum allowable {cfg.max_duration_seconds}s"
             )
 
-        raw_bytes = wf.readframes(n_frames)
+        # Resample to target sample rate if needed
+        if in_sr != target_sr:
+            tensor = resample_waveform(tensor, orig_sr=in_sr, target_sr=target_sr)
 
-    # 16-bit signed integer unpacking
-    num_samples = n_frames * n_channels
-    fmt = f"<{num_samples}h"
-    ints = struct.unpack(fmt, raw_bytes)
-
-    # Convert to float32 in [-1.0, 1.0]
-    tensor = torch.tensor(ints, dtype=torch.float32) / 32768.0
-
-    if n_channels > 1:
-        # Reshape to (n_frames, n_channels) and average across channels to obtain mono
-        tensor = tensor.view(-1, n_channels).mean(dim=1)
-
-    duration = len(tensor) / sample_rate
-    if config is not None:
-        if duration < config.min_duration_seconds:
-            raise ValueError(
-                f"Audio duration {duration:.2f}s is less than minimum {config.min_duration_seconds}s"
-            )
-        if duration > config.max_duration_seconds:
-            raise ValueError(
-                f"Audio duration {duration:.2f}s exceeds maximum {config.max_duration_seconds}s"
-            )
-        if config.normalize_amplitude:
+        if cfg.normalize_amplitude:
             tensor = normalize_waveform(tensor)
 
-    return tensor, sample_rate
+        return tensor, target_sr
+
+    finally:
+        if needs_close:
+            bio.close()
 
 
-def write_wav(path: Union[str, Path, Any], waveform: torch.Tensor, sample_rate: int) -> None:
+def load_wav(path: Union[str, Path], config: Optional[AudioConfig] = None) -> tuple[torch.Tensor, int]:
+    """Backwards-compatible wrapper calling ingest_audio."""
+    if config is None:
+        cfg = AudioConfig(min_duration_seconds=0.001, normalize_amplitude=False)
+    else:
+        cfg = config
+    return ingest_audio(path, config=cfg, target_sr=cfg.sample_rate)
+
+
+
+def write_wav(path: Union[str, Path, Any], waveform: torch.Tensor, sample_rate: int = 16000) -> None:
     """Save a 1D float32 PyTorch tensor as a 16-bit PCM WAV file or file-like object."""
-    # Ensure 1D and on CPU
     waveform = waveform.detach().cpu().squeeze()
     if waveform.dim() != 1:
         raise ValueError(f"Expected 1D waveform tensor, got shape {waveform.shape}")
 
-    # Clamp to prevent overflow wrap-around distortion
     clamped = torch.clamp(waveform, -1.0, 1.0)
     ints = (clamped * 32767.0).to(torch.int16).tolist()
-
     raw_bytes = struct.pack(f"<{len(ints)}h", *ints)
 
     if isinstance(path, (str, Path)):
@@ -108,7 +264,6 @@ def write_wav(path: Union[str, Path, Any], waveform: torch.Tensor, sample_rate: 
 
 
 save_wav = write_wav
-
 
 
 def normalize_waveform(waveform: torch.Tensor, target_peak: float = 0.95) -> torch.Tensor:
@@ -130,4 +285,3 @@ def generate_synthetic_tone(
     t = torch.arange(0, num_samples, dtype=torch.float32) / sample_rate
     waveform = amplitude * torch.sin(2.0 * math.pi * freq_hz * t)
     return waveform
-
