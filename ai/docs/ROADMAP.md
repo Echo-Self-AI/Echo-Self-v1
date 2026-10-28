@@ -53,7 +53,9 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P5-M01**: Video Frame Representation, Container I/O & Sequence Pipeline (`src/echoself_ai/video/frames.py`, `tests/test_video_frames.py`).
 - [x] **P5-M02**: Temporal Consistency, Motion Dynamics & Frame Interpolator Network (`src/echoself_ai/video/temporal.py`, `tests/test_temporal.py`).
 - [x] **P5-M03**: Prompt-to-Video Conditioning & Generation Pipeline with consent gating (`src/echoself_ai/video/pipeline.py`, `tests/test_video_pipeline.py`).
-- [ ] **P5-M04**: Video Evaluation Pipeline, Quality Metrics & Documentation (`src/echoself_ai/video/metrics.py`, `tests/test_video_metrics.py`, `docs/VIDEO.md`).
+- [x] **P5-M04**: Video Evaluation Pipeline, Quality Metrics & Documentation (`src/echoself_ai/video/metrics.py`, `tests/test_video_metrics.py`, `docs/VIDEO.md`).
+
+
 
 ---
 

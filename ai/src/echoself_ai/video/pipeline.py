@@ -184,11 +184,16 @@ class PromptToVideoGenerator(nn.Module):
         x_smoothed = self.temporal_smoother(x_video)  # (1, T, c, 64, 64)
 
         # 8. Render to RGB [-1.0, 1.0]
-        x_flat = x_smoothed.view(num_frames, c, self.config.image_size, self.config.image_size)
+        cur_h, cur_w = x_smoothed.shape[3], x_smoothed.shape[4]
+        x_flat = x_smoothed.view(num_frames, c, cur_h, cur_w)
         rgb_flat = self.to_rgb(x_flat)
+        target_size = (self.config.image_size, self.config.image_size)
+        if (cur_h, cur_w) != target_size:
+            rgb_flat = F.interpolate(rgb_flat, size=target_size, mode="bilinear", align_corners=False)
         rgb_video = rgb_flat.view(1, num_frames, 3, self.config.image_size, self.config.image_size)
 
         return rgb_video
+
 
     def generate(
         self,
