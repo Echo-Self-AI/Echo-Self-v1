@@ -2,8 +2,10 @@ import argparse
 import math
 from pathlib import Path
 import random
+from typing import Optional
 
 import torch
+
 
 from echoself_ai.dataset import load_corpus
 from echoself_ai.tokenizer import CharacterTokenizer
@@ -26,6 +28,7 @@ def run_training(
     device: str = "auto",
     prompt: str = "hello",
     checkpoint_dir: Path = Path("checkpoints/transformer"),
+    resume_from: Optional[Path] = None,
 ) -> dict:
     """Train a tiny decoder-only Transformer from scratch."""
     random.seed(seed)
@@ -60,7 +63,9 @@ def run_training(
         seed=seed,
         checkpoint_dir=checkpoint_dir,
         device=device,
+        resume_from=resume_from,
     )
+
 
     print("=" * 60)
     print("EchoSelf AI — Decoder-Only Transformer Training")
@@ -158,6 +163,12 @@ def main() -> None:
         default=Path("checkpoints/transformer"),
         help="Checkpoint directory",
     )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help="Path to checkpoint file to resume training from",
+    )
 
     args = parser.parse_args()
 
@@ -174,7 +185,9 @@ def main() -> None:
         device=args.device,
         prompt=args.prompt,
         checkpoint_dir=args.checkpoint_dir,
+        resume_from=args.resume_from,
     )
+
 
 
 if __name__ == "__main__":

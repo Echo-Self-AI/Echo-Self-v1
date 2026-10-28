@@ -32,9 +32,9 @@ This document tracks all phases, microsteps, criteria, and execution status.
 ### Phase 2: Language Model Improvements
 - [x] **P2-M01**: Subword Tokenizer (Byte-Pair Encoding / BPE from scratch) with serialization, special tokens, and unit tests (`src/echoself_ai/bpe_tokenizer.py`).
 - [x] **P2-M02**: Cosine Annealing Learning Rate Scheduler with Warmup (`CosineWarmupScheduler`) integrated into `Trainer` (`src/echoself_ai/training/scheduler.py`).
-- [ ] **P2-M03**: Resume-from-checkpoint training support in `Trainer` and `train_transformer.py`.
-
+- [x] **P2-M03**: Resume-from-checkpoint training support in `Trainer` and `train_transformer.py` (`tests/test_resume_training.py`).
 - [ ] **P2-M04**: Multi-shard text dataset loader and streaming chunking with license provenance (`docs/DATASETS.md`).
+
 - [ ] **P2-M05**: Comparative experiment: BPE tokenization + LR scheduling vs baseline character modeling (`docs/EXPERIMENTS.md`).
 
 

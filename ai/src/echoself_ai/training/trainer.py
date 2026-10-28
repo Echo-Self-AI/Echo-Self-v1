@@ -27,6 +27,7 @@ class TrainerConfig:
     use_cosine_scheduler: bool = False
     warmup_steps: int = 0
     min_lr: Optional[float] = None
+    resume_from: Optional[Path] = None
 
     def __post_init__(self) -> None:
         if self.steps < 1:
@@ -49,6 +50,9 @@ class TrainerConfig:
             raise ValueError(f"min_lr must be >= 0, got {self.min_lr}")
         if self.checkpoint_dir is not None:
             self.checkpoint_dir = Path(self.checkpoint_dir)
+        if self.resume_from is not None:
+            self.resume_from = Path(self.resume_from)
+
 
 
 
@@ -207,10 +211,33 @@ class Trainer:
         self.history: list[dict[str, float]] = []
 
     def train(self) -> dict[str, Any]:
-        """Execute the configured training loop."""
+        """Execute the configured training loop, supporting resuming from checkpoint."""
         self.model.train()
         block_size = self.model.config.block_size
         batch_size = self.config.batch_size
+
+        start_step = 0
+        best_val_loss = float("inf")
+
+        # Resume state if configured
+        if self.config.resume_from is not None:
+            ckpt = load_checkpoint(
+                self.config.resume_from,
+                device=self.device,
+                model=self.model,
+                optimizer=self.optimizer,
+            )
+            start_step = int(ckpt.get("step", 0))
+            if "metrics" in ckpt and "best_val_loss" in ckpt["metrics"]:
+                best_val_loss = float(ckpt["metrics"]["best_val_loss"])
+            elif "metrics" in ckpt and "val_loss" in ckpt["metrics"]:
+                best_val_loss = float(ckpt["metrics"]["val_loss"])
+
+            if self.scheduler is not None:
+                self.scheduler.current_step = start_step
+                new_lr = self.scheduler.get_lr(start_step)
+                for pg in self.optimizer.param_groups:
+                    pg["lr"] = new_lr
 
         # Initial metrics
         init_train_loss = evaluate_loss(
@@ -230,9 +257,10 @@ class Trainer:
             self.device,
         )
 
-        best_val_loss = init_val_loss
+        if best_val_loss == float("inf"):
+            best_val_loss = init_val_loss
 
-        for step in range(1, self.config.steps + 1):
+        for step in range(start_step + 1, self.config.steps + 1):
             x, y = get_batch(self.train_ids, block_size, batch_size, self.device)
 
             self.optimizer.zero_grad(set_to_none=True)
@@ -246,6 +274,7 @@ class Trainer:
                 )
 
             self.optimizer.step()
+
 
             # Advance learning rate scheduler if enabled
             if self.scheduler is not None:
