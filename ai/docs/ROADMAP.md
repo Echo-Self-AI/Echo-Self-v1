@@ -72,6 +72,13 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P8-M02**: Model Checkpoint Integrity & Tamper Verification (`src/echoself_ai/security/integrity.py`, `tests/test_integrity.py`).
 - [x] **P8-M03**: Resource Governance, Rate Limiting & Memory Watchdog (`src/echoself_ai/security/watchdog.py`, `tests/test_watchdog.py`).
 - [x] **P8-M04**: Full System Audit, Security Documentation & Operational Runbook (`docs/SECURITY.md`).
+
+### Phase 9: Real Media Ingestion (Audio & Image)
+- [x] **P9-M01**: Audit Media Interfaces & Ingestion Specification (`ai/docs/MEDIA.md`).
+- [ ] **P9-M02**: Implement Validated Audio Ingestion & Resampling (`src/echoself_ai/voice/audio.py`, `tests/test_audio_ingestion.py`).
+- [ ] **P9-M03**: Implement Validated Image Ingestion & Normalization (`src/echoself_ai/vision/image_ops.py`, `tests/test_image_ingestion.py`).
+- [ ] **P9-M04**: Connect Real Media to Voice & Avatar Embedding Handlers (`src/echoself_ai/service/unified.py`).
+- [ ] **P9-M05**: Media Integration Tests, Malformed Rejections, and Documentation (`tests/test_media_integration.py`).
 ---
 
 ## Microstep Execution Log
