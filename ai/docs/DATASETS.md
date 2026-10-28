@@ -33,12 +33,36 @@ This document records the exact sources, licenses, disk requirements, and prepro
 
 ---
 
-## 2. Speech Pretraining Dataset: LJSpeech (Planned Phase 3)
+## 2. Speech Pretraining Dataset: LJSpeech Subset (Phase 11)
+
+### Provenance & License
 
 | Property | Value |
 |---|---|
-| **Dataset Name** | The LJ Speech Dataset |
-| **Source** | LibriVox recordings of non-fiction book readings |
-| **License** | Public Domain (Creative Commons Zero / Dedication) |
-| **Audio Format** | 16-bit PCM WAV, 22,050 Hz (standardized to 16,000 Hz for EchoSelf) |
-| **Subsetting** | Initial training utilizes a curated 100-sample subset (~5-10 minutes of speech, ~15 MB) to verify gradient convergence within local VRAM limits before scaling. |
+| **Dataset Name** | The LJ Speech Dataset (Test Subset) |
+| **Original Creators** | Keith Ito & Linda Johnson (2017) |
+| **Origin & Speaker** | LibriVox recordings of non-fiction book readings by Linda Johnson |
+| **Primary License** | **Public Domain (Creative Commons CC0 1.0 Universal)** |
+| **Redistribution Terms** | Unrestricted public domain dedication — free for commercial, research, and educational use without royalty or copyright restrictions |
+| **Curated Subset** | 32 verified clips (`LJ001-0001` through `LJ001-0032`) mirrored from standard public domain TTS verification suites |
+| **Total Audio Duration** | ~2.5 minutes of continuous speech (~4,000 words across 32 utterances) |
+| **Total Disk Size** | 9.33 MB (wavs) + 7 KB (metadata.csv) |
+| **Audio Format** | 16-bit PCM WAV, mono, original sample rate 22,050 Hz |
+| **EchoSelf Standardized Rate** | 16,000 Hz (resampled on ingestion using pure-PyTorch band-limited interpolation) |
+| **Acoustic Features** | 80-channel log-mel spectrogram ($\text{n\_fft}=512$, $\text{hop\_length}=128$, $\text{win\_length}=512$, $16\text{ kHz}$) |
+| **Git Tracking** | Ignored by default in `.gitignore` (`data/raw/*`) |
+
+### Transcript Format & Vocabulary
+
+Transcripts in `metadata.csv` are pipe-separated records:
+```text
+clip_id|raw_text|normalized_text
+```
+- Example: `LJ001-0001|Printing, in the only sense with which we are at present concerned...|Printing, in the only sense with which we are at present concerned...`
+- Preprocessing tokenizes the normalized text characters into an ASCII character vocabulary (alphabet, punctuation, spaces, and padding/BOS tokens), or via BPE.
+
+### Train/Validation Split
+- **Training split**: 26 utterances (81.25%, ~7.6 MB)
+- **Validation split**: 6 utterances (18.75%, ~1.7 MB, `LJ001-0027` to `LJ001-0032`)
+- Validation clips are strictly held out to evaluate acoustic reconstruction error ($L_1$ mel loss) on unseen speech.
+

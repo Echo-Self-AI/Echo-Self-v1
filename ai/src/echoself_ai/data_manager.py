@@ -157,3 +157,92 @@ def fetch_and_prepare_dataset(
 
     return target_path, manifest
 
+
+@dataclass
+class SpeechDatasetManifest:
+    """Metadata, license, and provenance manifest for a speech dataset."""
+
+    name: str
+    version: str
+    source: str
+    license: str
+    num_clips: int
+    total_bytes: int
+    sample_rate: int
+    description: str
+    is_synthetic: bool = False
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2)
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "SpeechDatasetManifest":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(**data)
+
+
+LJSPEECH_BASE_URL = "https://raw.githubusercontent.com/mozilla/TTS/master/tests/data/ljspeech/"
+
+
+def fetch_ljspeech_subset(
+    target_dir: str | Path = "data/raw/ljspeech",
+    max_clips: int = 32,
+) -> tuple[Path, Path, SpeechDatasetManifest]:
+    """Download verified public domain LJSpeech test subset and metadata.
+
+    Returns:
+        (metadata_path, wavs_dir, manifest)
+    """
+    target_dir = Path(target_dir)
+    wavs_dir = target_dir / "wavs"
+    wavs_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = target_dir / "metadata.csv"
+    import urllib.request
+
+    if not metadata_path.is_file() or metadata_path.stat().st_size < 100:
+        meta_url = f"{LJSPEECH_BASE_URL}metadata.csv"
+        req = urllib.request.Request(meta_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            metadata_path.write_bytes(resp.read())
+
+    # Read clips from metadata
+    lines = metadata_path.read_text(encoding="utf-8").strip().splitlines()
+    clips_to_fetch = lines[:max_clips]
+
+    import concurrent.futures
+
+    def _fetch_single_clip(line: str) -> tuple[str, int]:
+        clip_id = line.split("|")[0].strip()
+        wav_path = wavs_dir / f"{clip_id}.wav"
+        if not wav_path.is_file() or wav_path.stat().st_size < 1000:
+            wav_url = f"{LJSPEECH_BASE_URL}wavs/{clip_id}.wav"
+            req = urllib.request.Request(wav_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                wav_path.write_bytes(resp.read())
+        return clip_id, wav_path.stat().st_size
+
+    total_bytes = 0
+    fetched_clips = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        for clip_id, size in executor.map(_fetch_single_clip, clips_to_fetch):
+            total_bytes += size
+            fetched_clips += 1
+
+    manifest = SpeechDatasetManifest(
+        name="ljspeech_subset",
+        version="1.1",
+        source="https://keithito.com/LJ-Speech-Dataset/ via Mozilla TTS Public Domain Test Suite",
+        license="Public Domain (Creative Commons CC0 1.0 Universal)",
+        num_clips=fetched_clips,
+        total_bytes=total_bytes,
+        sample_rate=22050,
+        description="Public domain speech dataset clips by Linda Johnson reading non-fiction passages",
+        is_synthetic=False,
+    )
+    manifest_path = target_dir / "ljspeech.manifest.json"
+    manifest_path.write_text(manifest.to_json(), encoding="utf-8")
+
+    return metadata_path, wavs_dir, manifest
+
+

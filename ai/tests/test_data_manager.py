@@ -65,3 +65,45 @@ def test_sharded_text_dataset_empty_files_raises():
 
     with pytest.raises(ValueError, match="chunk_chars"):
         ShardedTextDataset([Path("any.txt")], chunk_chars=0)
+
+
+def test_speech_dataset_manifest_roundtrip(tmp_path: Path):
+    from echoself_ai.data_manager import SpeechDatasetManifest
+
+    manifest = SpeechDatasetManifest(
+        name="test_speech",
+        version="1.0",
+        source="http://example.com/audio",
+        license="CC0",
+        num_clips=5,
+        total_bytes=1024,
+        sample_rate=16000,
+        description="Test speech dataset",
+    )
+    json_path = tmp_path / "speech.manifest.json"
+    json_path.write_text(manifest.to_json(), encoding="utf-8")
+
+    loaded = SpeechDatasetManifest.from_file(json_path)
+    assert loaded.name == "test_speech"
+    assert loaded.num_clips == 5
+    assert loaded.sample_rate == 16000
+
+
+def test_fetch_ljspeech_subset_local(tmp_path: Path):
+    from echoself_ai.data_manager import fetch_ljspeech_subset
+
+    # Test with simulated local metadata
+    target_dir = tmp_path / "ljspeech"
+    target_dir.mkdir(parents=True)
+    meta_path = target_dir / "metadata.csv"
+    meta_path.write_text("LJ001-0001|Hello world|Hello world\n", encoding="utf-8")
+    wavs_dir = target_dir / "wavs"
+    wavs_dir.mkdir()
+    (wavs_dir / "LJ001-0001.wav").write_bytes(b"RIFF" + b"\x00" * 2000)
+
+    returned_meta, returned_wavs, manifest = fetch_ljspeech_subset(target_dir, max_clips=1)
+    assert returned_meta.exists()
+    assert returned_wavs.exists()
+    assert manifest.num_clips == 1
+    assert manifest.license.startswith("Public Domain")
+
