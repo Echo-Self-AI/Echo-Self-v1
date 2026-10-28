@@ -269,9 +269,12 @@ class EchoSelfAIService:
         audio_wav = self.voice_synthesizer.synthesize(
             token_ids=tokens_tensor,
             user_id=req.user_id,
-            speaker_id=speaker_id,
-            consent_manager=self.voice_consent if speaker_id else None,
+            raw_speaker_id=speaker_id,
         )
+        # Squeeze batch dimension if present
+        if audio_wav.dim() > 1:
+            audio_wav = audio_wav.squeeze(0)
+
 
         buffer = BytesIO()
         save_wav(buffer, audio_wav, sample_rate=16000)

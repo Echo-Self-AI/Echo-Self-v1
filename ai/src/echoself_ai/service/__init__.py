@@ -1,4 +1,9 @@
 """EchoSelf AI Service Layer."""
+from echoself_ai.service.pipeline import (
+    DigitalTwinResponse,
+    MultimodalConsentError,
+    MultimodalPipeline,
+)
 from echoself_ai.service.server import (
     EchoSelfRequestHandler,
     ThreadedEchoSelfServer,
@@ -11,11 +16,15 @@ from echoself_ai.service.unified import (
 )
 
 __all__ = [
+    "DigitalTwinResponse",
     "EchoSelfAIService",
     "EchoSelfRequestHandler",
+    "MultimodalConsentError",
+    "MultimodalPipeline",
     "ProcessRequest",
     "ProcessResult",
     "ThreadedEchoSelfServer",
     "start_server_in_thread",
 ]
+
 

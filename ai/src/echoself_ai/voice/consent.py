@@ -90,6 +90,9 @@ class VoiceConsentManager:
             return False
         return record.is_active_for(scope)
 
+    verify_consent = check_consent
+
+
     def enforce_gate(self, user_id: str, speaker_id: str, scope: str = "synthesis") -> None:
         """Enforce strict consent gate, raising PermissionError if authorization is absent."""
         if not self.check_consent(user_id, speaker_id, scope):
