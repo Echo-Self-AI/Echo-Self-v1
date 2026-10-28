@@ -57,9 +57,9 @@ This document tracks all phases, microsteps, criteria, and execution status.
 
 ### Phase 6: Unified EchoSelf AI Service
 - [x] **P6-M01**: Unified Multimodal AI Service Facade (`src/echoself_ai/service/unified.py`, `tests/test_unified_service.py`).
-- [ ] **P6-M02**: HTTP Server Layer & Health Endpoint (`src/echoself_ai/service/server.py`, `tests/test_service_server.py`).
-
+- [x] **P6-M02**: HTTP Server Layer & Health Endpoint (`src/echoself_ai/service/server.py`, `tests/test_service_server.py`).
 - [ ] **P6-M03**: End-to-End Multimodal Pipeline & Gating (`src/echoself_ai/service/pipeline.py`, `tests/test_service_pipeline.py`).
+
 - [ ] **P6-M04**: Service Documentation, Architecture & Benchmarking (`docs/SERVICE.md`).
 ---
 
