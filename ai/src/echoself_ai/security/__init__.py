@@ -11,6 +11,11 @@ from echoself_ai.security.sanitizer import (
     InputSanitizerConfig,
     SanitizationResult,
 )
+from echoself_ai.security.watchdog import (
+    RateLimiter,
+    ResourceWatchdog,
+    WatchdogConfig,
+)
 
 __all__ = [
     "InputSanitizer",
@@ -22,5 +27,9 @@ __all__ = [
     "verify_checkpoint_integrity",
     "save_secure_checkpoint",
     "load_secure_checkpoint",
+    "RateLimiter",
+    "ResourceWatchdog",
+    "WatchdogConfig",
 ]
+
 

@@ -14,6 +14,7 @@ import uuid
 import torch
 
 from echoself_ai.security.sanitizer import InputSanitizer
+from echoself_ai.security.watchdog import RateLimiter, ResourceWatchdog
 from echoself_ai.tokenizer import CharacterTokenizer
 
 from echoself_ai.transformer.config import TransformerConfig
@@ -102,10 +103,12 @@ class EchoSelfAIService:
         self.consent_dir = consent_dir or Path("data/consent")
         self.checkpoints_dir = checkpoints_dir or Path("checkpoints")
 
-        # Consent Managers & Sanitizer
+        # Consent Managers, Sanitizer, Resource Governance
         self.voice_consent = VoiceConsentManager(storage_dir=self.consent_dir / "voice")
         self.visual_consent = VisualConsentManager(storage_dir=self.consent_dir / "visual")
         self.sanitizer = InputSanitizer()
+        self.watchdog = ResourceWatchdog()
+        self.rate_limiter = RateLimiter()
 
         # Initialize core models
 
@@ -203,6 +206,33 @@ class EchoSelfAIService:
                 metadata={
                     "execution_time_ms": (time.perf_counter() - t0) * 1000.0,
                     "security_flags": flags,
+                },
+            )
+
+        # Rate limiting check per user
+        if req.user_id:
+            allowed, retry_after = self.rate_limiter.check_rate_limit(req.user_id)
+            if not allowed:
+                return ProcessResult(
+                    job_id=req.job_id,
+                    status="failed",
+                    error=f"Rate limit exceeded. Please retry after {retry_after} seconds.",
+                    metadata={
+                        "execution_time_ms": (time.perf_counter() - t0) * 1000.0,
+                        "retry_after_seconds": retry_after,
+                    },
+                )
+
+        # Resource memory headroom check
+        headroom_ok, headroom_msg = self.watchdog.check_memory_headroom()
+        if not headroom_ok:
+            return ProcessResult(
+                job_id=req.job_id,
+                status="failed",
+                error=f"Resource constraint: {headroom_msg}",
+                metadata={
+                    "execution_time_ms": (time.perf_counter() - t0) * 1000.0,
+                    "resource_error": headroom_msg,
                 },
             )
 
