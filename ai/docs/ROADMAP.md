@@ -36,6 +36,14 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P2-M04**: Multi-shard text dataset loader and streaming chunking with license provenance (`src/echoself_ai/data_manager.py`, `docs/DATASETS.md`, `data/manifest.json`).
 - [x] **P2-M05**: Comparative experiment: BPE tokenization + LR scheduling vs baseline character modeling (`docs/EXPERIMENTS.md`).
 
+### Phase 3: Voice AI
+- [x] **P3-M01**: Zero-dependency WAV audio loader, parser, peak normalizer, and synthetic tone generator (`src/echoself_ai/voice/audio.py`, `tests/test_audio.py`).
+- [ ] **P3-M02**: Log Mel-Spectrogram feature extractor and STFT inversion using PyTorch primitives (`src/echoself_ai/voice/features.py`).
+- [ ] **P3-M03**: Voice consent verification and user authorization gating system (`src/echoself_ai/voice/consent.py`).
+- [ ] **P3-M04**: Neural acoustic feature predictor model (text tokens to mel-spectrogram) from scratch (`src/echoself_ai/voice/acoustic_model.py`).
+- [ ] **P3-M05**: Griffin-Lim phase vocoder reconstruction, end-to-end synthesis test, and voice documentation (`docs/VOICE.md`).
+
+
 
 
 
