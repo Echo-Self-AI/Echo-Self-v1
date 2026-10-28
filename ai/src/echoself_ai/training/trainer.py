@@ -24,6 +24,9 @@ class TrainerConfig:
     seed: int = 42
     checkpoint_dir: Optional[Path] = None
     device: str = "cpu"  # "cpu", "cuda", or "auto"
+    use_cosine_scheduler: bool = False
+    warmup_steps: int = 0
+    min_lr: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.steps < 1:
@@ -40,8 +43,13 @@ class TrainerConfig:
             raise ValueError(f"eval_interval must be >= 1, got {self.eval_interval}")
         if self.eval_batches < 1:
             raise ValueError(f"eval_batches must be >= 1, got {self.eval_batches}")
+        if self.warmup_steps < 0:
+            raise ValueError(f"warmup_steps must be >= 0, got {self.warmup_steps}")
+        if self.min_lr is not None and self.min_lr < 0:
+            raise ValueError(f"min_lr must be >= 0, got {self.min_lr}")
         if self.checkpoint_dir is not None:
             self.checkpoint_dir = Path(self.checkpoint_dir)
+
 
 
 def get_batch(
@@ -182,6 +190,19 @@ class Trainer:
             weight_decay=config.weight_decay,
         )
 
+        # Learning rate scheduler
+        from echoself_ai.training.scheduler import CosineWarmupScheduler
+
+        self.scheduler: Optional[CosineWarmupScheduler] = None
+        if config.use_cosine_scheduler:
+            self.scheduler = CosineWarmupScheduler(
+                optimizer=self.optimizer,
+                warmup_steps=config.warmup_steps,
+                max_steps=config.steps,
+                max_lr=config.learning_rate,
+                min_lr=config.min_lr,
+            )
+
         # History tracking
         self.history: list[dict[str, float]] = []
 
@@ -225,6 +246,11 @@ class Trainer:
                 )
 
             self.optimizer.step()
+
+            # Advance learning rate scheduler if enabled
+            if self.scheduler is not None:
+                self.scheduler.step(step)
+
 
             # Periodic evaluation
             if step == 1 or step % self.config.eval_interval == 0 or step == self.config.steps:
