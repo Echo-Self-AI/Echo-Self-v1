@@ -69,7 +69,7 @@ This document tracks all phases, microsteps, criteria, and execution status.
 
 ### Phase 8: Quality, Security & Operational Hardening
 - [x] **P8-M01**: Input Validation, Safety & Prompt Injection Sanitization (`src/echoself_ai/security/sanitizer.py`, `tests/test_sanitizer.py`).
-- [ ] **P8-M02**: Model Checkpoint Integrity & Tamper Verification (`src/echoself_ai/security/integrity.py`, `tests/test_integrity.py`).
+- [x] **P8-M02**: Model Checkpoint Integrity & Tamper Verification (`src/echoself_ai/security/integrity.py`, `tests/test_integrity.py`).
 - [ ] **P8-M03**: Resource Governance, Rate Limiting & Memory Watchdog (`src/echoself_ai/security/watchdog.py`, `tests/test_watchdog.py`).
 - [ ] **P8-M04**: Full System Audit, Security Documentation & Operational Runbook (`docs/SECURITY.md`).
 ---
