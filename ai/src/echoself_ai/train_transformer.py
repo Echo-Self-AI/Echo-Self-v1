@@ -29,14 +29,33 @@ def run_training(
     prompt: str = "hello",
     checkpoint_dir: Path = Path("checkpoints/transformer"),
     resume_from: Optional[Path] = None,
+    tokenizer_type: str = "char",
+    bpe_vocab_size: int = 50,
+    use_cosine_scheduler: bool = False,
+    warmup_steps: int = 0,
+    min_lr: Optional[float] = None,
 ) -> dict:
     """Train a tiny decoder-only Transformer from scratch."""
     random.seed(seed)
     torch.manual_seed(seed)
 
     text = load_corpus(data_path)
-    tokenizer = CharacterTokenizer(text)
-    token_ids = torch.tensor(tokenizer.encode(text), dtype=torch.long)
+
+    if tokenizer_type == "bpe":
+        from echoself_ai.bpe_tokenizer import BPETokenizer
+
+        tokenizer = BPETokenizer()
+        tokenizer.train(text, target_vocab_size=bpe_vocab_size)
+        raw_ids = tokenizer.encode(text)
+        vocab_chars = tokenizer.vocab
+        vocab_size = tokenizer.vocab_size
+    else:
+        tokenizer = CharacterTokenizer(text)
+        raw_ids = tokenizer.encode(text)
+        vocab_chars = tokenizer.characters
+        vocab_size = tokenizer.vocab_size
+
+    token_ids = torch.tensor(raw_ids, dtype=torch.long)
 
     # 90% train / 10% val split sequentially
     split = int(len(token_ids) * 0.9)
@@ -45,7 +64,7 @@ def run_training(
     val_ids = token_ids[split:]
 
     model_config = TransformerConfig(
-        vocab_size=tokenizer.vocab_size,
+        vocab_size=vocab_size,
         block_size=block_size,
         n_embd=n_embd,
         n_head=n_head,
@@ -64,20 +83,23 @@ def run_training(
         checkpoint_dir=checkpoint_dir,
         device=device,
         resume_from=resume_from,
+        use_cosine_scheduler=use_cosine_scheduler,
+        warmup_steps=warmup_steps,
+        min_lr=min_lr,
     )
-
 
     print("=" * 60)
     print("EchoSelf AI — Decoder-Only Transformer Training")
     print("=" * 60)
     print(f"Corpus: {data_path} ({len(text)} characters)")
-    print(f"Vocabulary: {tokenizer.vocab_size} unique characters")
+    print(f"Tokenizer: {tokenizer_type.upper()} (vocab size: {vocab_size})")
     print(f"Model parameters: {model.get_num_params():,}")
     print(
         f"Architecture: n_layer={n_layer}, n_head={n_head}, "
         f"n_embd={n_embd}, block_size={block_size}"
     )
-    print(f"Training characters: {len(train_ids)} | Validation characters: {len(val_ids)}")
+    print(f"Training tokens: {len(train_ids)} | Validation tokens: {len(val_ids)}")
+    print(f"Learning rate scheduler: {'Cosine with Warmup' if use_cosine_scheduler else 'Constant'}")
     print(f"Requested device: {device}")
     print("-" * 60)
 
@@ -86,7 +108,7 @@ def run_training(
         config=trainer_config,
         train_ids=train_ids,
         val_ids=val_ids,
-        vocab_characters=tokenizer.characters,
+        vocab_characters=vocab_chars,
     )
 
     results = trainer.train()
@@ -110,18 +132,21 @@ def run_training(
         eval_model.eval()
 
         # Encode prompt
-        valid_prompt_chars = [c for c in prompt if c in tokenizer.stoi]
-        if not valid_prompt_chars:
-            valid_prompt_chars = [tokenizer.characters[0]]
-        prompt_tensor = torch.tensor(
-            [[tokenizer.stoi[c] for c in valid_prompt_chars]],
-            dtype=torch.long,
-            device=trainer.device,
-        )
+        if tokenizer_type == "bpe":
+            encoded_prompt = tokenizer.encode(prompt)
+            if not encoded_prompt:
+                encoded_prompt = [tokenizer.bos_id]
+        else:
+            valid_prompt_chars = [c for c in prompt if c in tokenizer.stoi]
+            if not valid_prompt_chars:
+                valid_prompt_chars = [tokenizer.characters[0]]
+            encoded_prompt = [tokenizer.stoi[c] for c in valid_prompt_chars]
+
+        prompt_tensor = torch.tensor([encoded_prompt], dtype=torch.long, device=trainer.device)
 
         generated = eval_model.generate(
             prompt_tensor,
-            max_new_tokens=150,
+            max_new_tokens=100,
             temperature=0.8,
             top_k=5,
         )
@@ -135,6 +160,7 @@ def run_training(
         results["sample_generation"] = generated_text
 
     return results
+
 
 
 def main() -> None:
@@ -169,6 +195,36 @@ def main() -> None:
         default=None,
         help="Path to checkpoint file to resume training from",
     )
+    parser.add_argument(
+        "--tokenizer-type",
+        type=str,
+        choices=["char", "bpe"],
+        default="char",
+        help="Tokenizer algorithm ('char' or 'bpe')",
+    )
+    parser.add_argument(
+        "--bpe-vocab-size",
+        type=int,
+        default=50,
+        help="Target BPE vocabulary size when using --tokenizer-type bpe",
+    )
+    parser.add_argument(
+        "--use-cosine-scheduler",
+        action="store_true",
+        help="Enable cosine annealing learning rate scheduler with warmup",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=20,
+        help="Linear warmup steps for scheduler",
+    )
+    parser.add_argument(
+        "--min-lr",
+        type=float,
+        default=None,
+        help="Minimum learning rate floor for scheduler",
+    )
 
     args = parser.parse_args()
 
@@ -186,9 +242,14 @@ def main() -> None:
         prompt=args.prompt,
         checkpoint_dir=args.checkpoint_dir,
         resume_from=args.resume_from,
+        tokenizer_type=args.tokenizer_type,
+        bpe_vocab_size=args.bpe_vocab_size,
+        use_cosine_scheduler=args.use_cosine_scheduler,
+        warmup_steps=args.warmup_steps,
+        min_lr=args.min_lr,
     )
-
 
 
 if __name__ == "__main__":
     main()
+

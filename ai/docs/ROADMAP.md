@@ -34,7 +34,8 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P2-M02**: Cosine Annealing Learning Rate Scheduler with Warmup (`CosineWarmupScheduler`) integrated into `Trainer` (`src/echoself_ai/training/scheduler.py`).
 - [x] **P2-M03**: Resume-from-checkpoint training support in `Trainer` and `train_transformer.py` (`tests/test_resume_training.py`).
 - [x] **P2-M04**: Multi-shard text dataset loader and streaming chunking with license provenance (`src/echoself_ai/data_manager.py`, `docs/DATASETS.md`, `data/manifest.json`).
-- [ ] **P2-M05**: Comparative experiment: BPE tokenization + LR scheduling vs baseline character modeling (`docs/EXPERIMENTS.md`).
+- [x] **P2-M05**: Comparative experiment: BPE tokenization + LR scheduling vs baseline character modeling (`docs/EXPERIMENTS.md`).
+
 
 
 
