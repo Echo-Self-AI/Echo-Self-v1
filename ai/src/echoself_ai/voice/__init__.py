@@ -1,4 +1,5 @@
 """Voice AI subsystem for EchoSelf."""
+from echoself_ai.voice.acoustic_model import AcousticModel, AcousticModelConfig
 from echoself_ai.voice.audio import (
     AudioConfig,
     generate_synthetic_tone,
@@ -10,6 +11,8 @@ from echoself_ai.voice.consent import VoiceConsentManager, VoiceConsentRecord
 from echoself_ai.voice.features import LogMelSpectrogram, create_mel_filterbank
 
 __all__ = [
+    "AcousticModel",
+    "AcousticModelConfig",
     "AudioConfig",
     "LogMelSpectrogram",
     "VoiceConsentManager",
