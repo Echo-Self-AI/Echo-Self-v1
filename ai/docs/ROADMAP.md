@@ -83,8 +83,8 @@ This document tracks all phases, microsteps, criteria, and execution status.
 ### Phase 10: Language Model Pretraining (Real Data)
 - [x] **P10-M01**: Dataset Provenance, Ingestion Pipeline & Splitting (`ai/docs/DATASETS.md`, `src/echoself_ai/data_manager.py`).
 - [x] **P10-M02**: Pretraining Smoke Test with Shifted Targets & Checkpoint Roundtrip (`tests/test_pretraining_smoke.py`).
-- [ ] **P10-M03**: Execute Transformer Pretraining on Real Data with GPU Acceleration (`src/echoself_ai/train_transformer.py`).
-- [ ] **P10-M04**: Text Generation Evaluation and Checkpoint Verification.
+- [x] **P10-M03**: Execute Transformer Pretraining on Real Data with GPU Acceleration (`src/echoself_ai/train_transformer.py`).
+- [x] **P10-M04**: Text Generation Evaluation and Checkpoint Verification (`ai/docs/EXPERIMENTS.md`, `checkpoints/transformer_real/best_model.pt`).
 ---
 
 ## Microstep Execution Log

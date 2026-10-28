@@ -101,3 +101,77 @@ e learnsels at learn learn
 ```
 The model successfully emits merged multicharacter tokens such as `"hello"`, `"learn"`, `"echo"`, and `"models"`.
 
+---
+
+## Experiment 3: Pretraining Decoder-Only Transformer on TinyShakespeare (Phase 10 Milestone)
+
+- **Date**: 2026-10-28
+- **Corpus**: `data/raw/tinyshakespeare.txt` (1,115,394 characters, ~40,000 lines; Project Gutenberg Public Domain)
+- **Objective**: Pretrain the 4-layer decoder-only Transformer from scratch (randomly initialized weights) using Byte-Pair Encoding (BPE) on real text data with CUDA GPU acceleration, record convergence metrics, and evaluate text generation against baselines.
+
+### Training Configuration
+
+| Parameter | Value | Notes |
+| :--- | :--- | :--- |
+| Model Architecture | 4 layers, 4 attention heads, Pre-LN | Standard causal decoder Transformer |
+| Embedding Dimension (`n_embd`) | 128 | Head dimension: 32 |
+| Context Length (`block_size`) | 64 | Max tokens processed per causal step |
+| Total Parameters | **834,304** | All parameters randomly initialized |
+| Tokenizer | BPETokenizer | 256 vocabulary size, trained strictly on training split |
+| Training Tokens | 655,648 | 90% split of corpus |
+| Validation Tokens | 73,762 | 10% split of corpus (zero leakage into tokenizer) |
+| Batch Size | 32 | 32 sequences of 64 tokens = 2,048 tokens/step |
+| Optimizer | AdamW (`lr=1e-3`, `weight_decay=0.01`, `clip=1.0`) | Linear gradient clipping |
+| Total Steps | 500 | 1,024,000 tokens processed |
+| Hardware & Device | NVIDIA RTX 3050 Laptop GPU (`cuda:0`) | CUDA acceleration automatically selected |
+| Training Time | ~45 seconds | Efficient memory footprint (< 1.5 GB VRAM) |
+| Checkpoint Path | `checkpoints/transformer_real/best_model.pt` | Verified with SHA-256 sidecar checksum |
+
+### Quantitative Metrics
+
+| Metric | Initial (Step 0) | Final (Step 500) | Best Validation |
+| :--- | :--- | :--- | :--- |
+| **Training Loss** | 5.5639 | **2.8236** | — |
+| **Validation Loss** | 5.5603 | **2.9087** | **2.9087** |
+| **Training Perplexity** | ~260.8 | **16.84** | — |
+| **Validation Perplexity**| ~259.9 | **18.33** | **18.33** |
+
+> [!NOTE]
+> Perplexity values are calculated in the learned 256-token BPE space ($e^{\mathcal{L}}$).
+
+### Qualitative Text Generation Comparison
+
+Prompt: `"ROMEO:"`
+
+#### 1. Baseline Bigram Model (Random / First-Order Letter Lookup)
+```text
+hrwtprd txwtai ra wtrwytumwcdxwxxpyxitsfoe
+```
+*Memoryless transition without words, syllables, or sentence structure.*
+
+#### 2. Initial Transformer (Random Initialization, Step 0)
+```text
+ROMEO:;!x_81Q(P#;--q?v;bY,
+```
+*Uniform noise over vocabulary without phonotactics or punctuation rules.*
+
+#### 3. Trained Transformer (Step 500, Checkpoint Reloaded)
+```text
+ROMEO:
+It my am lord, a be a spame in to cage,
+Which my cagain cance the common their fict,
+And the can ager and flown and fall to to the gry:
+If the 
+```
+
+### Analysis & Honest Capabilities Assessment
+- **Learned Features**:
+  1. **Play script structure**: Preserves speaker header and newline format (`ROMEO:\n...`).
+  2. **Subword & word boundaries**: Constructs common English words (`lord`, `cage`, `common`, `their`, `fall`, `flown`) and punctuation patterns.
+  3. **Rhythmic meter**: Emulates Elizabethan verse line length and cadence.
+- **Honest Limitations**:
+  - The model does not understand semantics, character motivation, or factual reality.
+  - Generates plausible-sounding Elizabethan pseudo-words (`cagain`, `fict`, `ager`, `gry`) reflecting the BPE vocabulary capacity (256 merges) and 500-step training envelope.
+  - This is an evaluated milestone demonstration of causal pretraining from random weights on local hardware.
+
+

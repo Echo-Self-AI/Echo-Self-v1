@@ -156,6 +156,7 @@ def load_checkpoint(
     checkpoint = torch.load(path, map_location=device, weights_only=False)
 
     if model is not None:
+        model.to(device)
         model.load_state_dict(checkpoint["model_state_dict"])
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])

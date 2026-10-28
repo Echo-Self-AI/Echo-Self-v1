@@ -130,7 +130,7 @@ def run_training(
     # Verification: reload from saved best checkpoint and generate
     best_ckpt_path = checkpoint_dir / "best_model.pt"
     if best_ckpt_path.exists():
-        eval_model = TransformerLanguageModel(model_config)
+        eval_model = TransformerLanguageModel(model_config).to(trainer.device)
         load_checkpoint(best_ckpt_path, device=trainer.device, model=eval_model)
         eval_model.eval()
 
