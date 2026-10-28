@@ -19,9 +19,11 @@ build/
 *.egg-info/
 
 # Checkpoints (ignore all trained checkpoints by default to prevent large files in git; preserve baseline bigram.pt)
+checkpoints/**/*.pt
 checkpoints/*.pt
 !checkpoints/bigram.pt
-!checkpoints/.gitkeep
+!checkpoints/**/.gitkeep
+
 
 # Processed data caches
 data/processed/*

@@ -27,7 +27,8 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P1-M03**: Feed-forward network, layer normalization, residual blocks, and full Transformer architecture (`src/echoself_ai/transformer/model.py`) with unit tests.
 - [x] **P1-M04**: Autoregressive text generation with temperature and top-k sampling (`src/echoself_ai/transformer/generation.py`) with unit tests.
 - [x] **P1-M05**: Training engine with evaluation, gradient clipping, metrics tracking, and safe checkpoint save/load (`src/echoself_ai/training/trainer.py`).
-- [ ] **P1-M06**: Full Transformer training run on corpus, baseline comparison with bigram model, and experiment report.
+- [x] **P1-M06**: Full Transformer training run on corpus, baseline comparison with bigram model, and experiment report (`docs/EXPERIMENTS.md`, `docs/MODEL_CARDS.md`).
+
 
 
 ---

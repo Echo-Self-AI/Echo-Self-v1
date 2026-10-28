@@ -52,6 +52,12 @@ uv run pytest
 uv run python -m echoself_ai.train_bigram --steps 1000 --seed 42
 ```
 
+### 4. Train from-scratch Decoder-Only Transformer
+```bash
+uv run python -m echoself_ai.train_transformer --steps 300 --device cpu --seed 42
+```
+
+
 ## Documentation
 - [ROADMAP.md](docs/ROADMAP.md) — Phased milestones, completed microsteps, and next steps.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Module hierarchy and interface designs.
