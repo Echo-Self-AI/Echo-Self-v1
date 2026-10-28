@@ -55,8 +55,12 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P5-M03**: Prompt-to-Video Conditioning & Generation Pipeline with consent gating (`src/echoself_ai/video/pipeline.py`, `tests/test_video_pipeline.py`).
 - [x] **P5-M04**: Video Evaluation Pipeline, Quality Metrics & Documentation (`src/echoself_ai/video/metrics.py`, `tests/test_video_metrics.py`, `docs/VIDEO.md`).
 
+### Phase 6: Unified EchoSelf AI Service
+- [x] **P6-M01**: Unified Multimodal AI Service Facade (`src/echoself_ai/service/unified.py`, `tests/test_unified_service.py`).
+- [ ] **P6-M02**: HTTP Server Layer & Health Endpoint (`src/echoself_ai/service/server.py`, `tests/test_service_server.py`).
 
-
+- [ ] **P6-M03**: End-to-End Multimodal Pipeline & Gating (`src/echoself_ai/service/pipeline.py`, `tests/test_service_pipeline.py`).
+- [ ] **P6-M04**: Service Documentation, Architecture & Benchmarking (`docs/SERVICE.md`).
 ---
 
 ## Microstep Execution Log

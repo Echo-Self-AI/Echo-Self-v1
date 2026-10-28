@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import struct
-from typing import Optional
+from typing import Any, Optional, Union
 import wave
 
 import torch
@@ -80,11 +80,8 @@ def load_wav(path: str | Path, config: Optional[AudioConfig] = None) -> tuple[to
     return tensor, sample_rate
 
 
-def write_wav(path: str | Path, waveform: torch.Tensor, sample_rate: int) -> None:
-    """Save a 1D float32 PyTorch tensor as a 16-bit PCM WAV file."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
+def write_wav(path: Union[str, Path, Any], waveform: torch.Tensor, sample_rate: int) -> None:
+    """Save a 1D float32 PyTorch tensor as a 16-bit PCM WAV file or file-like object."""
     # Ensure 1D and on CPU
     waveform = waveform.detach().cpu().squeeze()
     if waveform.dim() != 1:
@@ -96,11 +93,22 @@ def write_wav(path: str | Path, waveform: torch.Tensor, sample_rate: int) -> Non
 
     raw_bytes = struct.pack(f"<{len(ints)}h", *ints)
 
-    with wave.open(str(path), "wb") as wf:
+    if isinstance(path, (str, Path)):
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        target = str(p)
+    else:
+        target = path
+
+    with wave.open(target, "wb") as wf:
         wf.setnchannels(1)  # Mono
         wf.setsampwidth(2)  # 16-bit
         wf.setframerate(sample_rate)
         wf.writeframes(raw_bytes)
+
+
+save_wav = write_wav
+
 
 
 def normalize_waveform(waveform: torch.Tensor, target_peak: float = 0.95) -> torch.Tensor:

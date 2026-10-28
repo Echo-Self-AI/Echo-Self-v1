@@ -5,6 +5,7 @@ from echoself_ai.voice.audio import (
     generate_synthetic_tone,
     load_wav,
     normalize_waveform,
+    save_wav,
     write_wav,
 )
 from echoself_ai.voice.consent import VoiceConsentManager, VoiceConsentRecord
@@ -24,5 +25,6 @@ __all__ = [
     "generate_synthetic_tone",
     "load_wav",
     "normalize_waveform",
+    "save_wav",
     "write_wav",
 ]
