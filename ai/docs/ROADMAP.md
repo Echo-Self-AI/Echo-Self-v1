@@ -79,6 +79,12 @@ This document tracks all phases, microsteps, criteria, and execution status.
 - [x] **P9-M03**: Implement Validated Image Ingestion & Normalization (`src/echoself_ai/vision/image_ops.py`, `tests/test_image_ingestion.py`).
 - [x] **P9-M04**: Connect Real Media to Voice & Avatar Embedding Handlers (`src/echoself_ai/service/unified.py`).
 - [x] **P9-M05**: Media Integration Tests, Malformed Rejections, and Documentation (`tests/test_media_integration.py`).
+
+### Phase 10: Language Model Pretraining (Real Data)
+- [x] **P10-M01**: Dataset Provenance, Ingestion Pipeline & Splitting (`ai/docs/DATASETS.md`, `src/echoself_ai/data_manager.py`).
+- [x] **P10-M02**: Pretraining Smoke Test with Shifted Targets & Checkpoint Roundtrip (`tests/test_pretraining_smoke.py`).
+- [ ] **P10-M03**: Execute Transformer Pretraining on Real Data with GPU Acceleration (`src/echoself_ai/train_transformer.py`).
+- [ ] **P10-M04**: Text Generation Evaluation and Checkpoint Verification.
 ---
 
 ## Microstep Execution Log

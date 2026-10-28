@@ -112,3 +112,48 @@ class ShardedTextDataset:
             with open(path, "r", encoding="utf-8") as f:
                 while chunk := f.read(self.chunk_chars):
                     yield chunk
+
+
+DATASET_REGISTRY = {
+    "tinyshakespeare": {
+        "url": "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+        "filename": "tinyshakespeare.txt",
+        "license": "Public Domain / Project Gutenberg",
+        "description": "Public domain extract of William Shakespeare works for language modeling",
+        "expected_min_bytes": 1000000,
+    }
+}
+
+
+def fetch_and_prepare_dataset(
+    name: str = "tinyshakespeare",
+    target_dir: str | Path = "data/raw",
+) -> tuple[Path, DatasetManifest]:
+    """Download, clean, and generate manifest for a registered public domain dataset."""
+    if name not in DATASET_REGISTRY:
+        raise ValueError(f"Unknown dataset '{name}'. Available: {list(DATASET_REGISTRY.keys())}")
+
+    info = DATASET_REGISTRY[name]
+    target_path = Path(target_dir) / info["filename"]
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not target_path.is_file() or target_path.stat().st_size < info["expected_min_bytes"]:
+        import urllib.request
+        with urllib.request.urlopen(info["url"], timeout=30) as resp:
+            raw_text = resp.read().decode("utf-8")
+
+        cleaned_text = TextCleaner.normalize_text(raw_text)
+        target_path.write_text(cleaned_text, encoding="utf-8")
+
+    manifest = create_manifest_for_corpus(
+        corpus_path=target_path,
+        name=name,
+        source=info["url"],
+        license_type=info["license"],
+        description=info["description"],
+    )
+    manifest_path = target_path.with_suffix(".manifest.json")
+    manifest_path.write_text(manifest.to_json(), encoding="utf-8")
+
+    return target_path, manifest
+

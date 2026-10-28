@@ -129,6 +129,17 @@ def save_checkpoint(
     }
     torch.save(state, path)
 
+    # Automatically generate cryptographic SHA-256 sidecar
+    import hashlib
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
+    sidecar = path.with_suffix(path.suffix + ".sha256")
+    sidecar.write_text(f"{digest}  {path.name}\n", encoding="utf-8")
+
+
 
 def load_checkpoint(
     path: Path,

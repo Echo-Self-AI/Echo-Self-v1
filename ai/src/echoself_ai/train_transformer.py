@@ -41,27 +41,30 @@ def run_training(
 
     text = load_corpus(data_path)
 
+    # 90% train / 10% validation text split strictly separated before tokenization
+    split_idx = int(len(text) * 0.9)
+    train_text = text[:split_idx]
+    val_text = text[split_idx:]
+
     if tokenizer_type == "bpe":
         from echoself_ai.bpe_tokenizer import BPETokenizer
 
         tokenizer = BPETokenizer()
-        tokenizer.train(text, target_vocab_size=bpe_vocab_size)
-        raw_ids = tokenizer.encode(text)
+        tokenizer.train(train_text, target_vocab_size=bpe_vocab_size)
+        train_raw_ids = tokenizer.encode(train_text)
+        val_raw_ids = tokenizer.encode(val_text)
         vocab_chars = tokenizer.vocab
         vocab_size = tokenizer.vocab_size
     else:
-        tokenizer = CharacterTokenizer(text)
-        raw_ids = tokenizer.encode(text)
+        tokenizer = CharacterTokenizer(train_text)
+        train_raw_ids = tokenizer.encode(train_text)
+        val_raw_ids = [tokenizer.stoi[c] for c in val_text if c in tokenizer.stoi]
         vocab_chars = tokenizer.characters
         vocab_size = tokenizer.vocab_size
 
-    token_ids = torch.tensor(raw_ids, dtype=torch.long)
+    train_ids = torch.tensor(train_raw_ids, dtype=torch.long)
+    val_ids = torch.tensor(val_raw_ids, dtype=torch.long)
 
-    # 90% train / 10% val split sequentially
-    split = int(len(token_ids) * 0.9)
-    split = max(block_size + 2, min(split, len(token_ids) - (block_size + 2)))
-    train_ids = token_ids[:split]
-    val_ids = token_ids[split:]
 
     model_config = TransformerConfig(
         vocab_size=vocab_size,

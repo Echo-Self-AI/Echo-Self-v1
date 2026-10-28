@@ -25,9 +25,12 @@ checkpoints/*.pt
 !checkpoints/**/.gitkeep
 
 
-# Processed data caches
+# Processed data caches and raw external datasets
 data/processed/*
 !data/processed/.gitkeep
+data/raw/*
+!data/raw/tiny_corpus.txt
+!data/raw/.gitkeep
 
 # Experiments runtime output
 experiments/*
