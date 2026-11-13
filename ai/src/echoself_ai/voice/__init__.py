@@ -38,6 +38,14 @@ from echoself_ai.voice.features import (
     extract_log_mel_spectrogram,
 )
 from echoself_ai.voice.nvs import NVSConfig, TextToSpeech, synthesize_to_file, get_synthesis_latency
+from echoself_ai.voice.speaker_verification import (
+    SpeakerEncoderConfig,
+    SpeakerEncoder,
+    SpeakerProfile,
+    SpeakerEnrollment,
+    SpeakerVerifier,
+    generate_challenge_phrase,
+)
 from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 
 __all__ = [
@@ -45,6 +53,12 @@ __all__ = [
     "TextToSpeech",
     "synthesize_to_file",
     "get_synthesis_latency",
+    "SpeakerEncoderConfig",
+    "SpeakerEncoder",
+    "SpeakerProfile",
+    "SpeakerEnrollment",
+    "SpeakerVerifier",
+    "generate_challenge_phrase",
     "ASRConfig",
     "ASRModel",
     "CTCDecoder",
