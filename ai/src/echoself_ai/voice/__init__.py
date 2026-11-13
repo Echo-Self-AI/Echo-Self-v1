@@ -1,5 +1,12 @@
 """Voice AI subsystem for EchoSelf."""
 from echoself_ai.voice.acoustic_model import AcousticModel, AcousticModelConfig
+from echoself_ai.voice.vad import (
+    EnergyVAD,
+    NeuralVAD,
+    VoiceActivityDetector,
+    create_vad,
+)
+from echoself_ai.voice.vad_config import VADConfig
 from echoself_ai.voice.audio import (
     AudioConfig,
     AudioDurationError,
@@ -33,6 +40,11 @@ from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 __all__ = [
     "AcousticModel",
     "AcousticModelConfig",
+    "EnergyVAD",
+    "NeuralVAD",
+    "VoiceActivityDetector",
+    "VADConfig",
+    "create_vad",
     "SpeechDataset",
     "SpeechItem",
     "SpeechVocab",
