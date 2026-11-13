@@ -37,9 +37,14 @@ from echoself_ai.voice.features import (
     create_mel_filterbank,
     extract_log_mel_spectrogram,
 )
+from echoself_ai.voice.nvs import NVSConfig, TextToSpeech, synthesize_to_file, get_synthesis_latency
 from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 
 __all__ = [
+    "NVSConfig",
+    "TextToSpeech",
+    "synthesize_to_file",
+    "get_synthesis_latency",
     "ASRConfig",
     "ASRModel",
     "CTCDecoder",
