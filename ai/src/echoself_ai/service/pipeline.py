@@ -1,7 +1,17 @@
-"""End-to-end multimodal orchestrator linking text, voice, avatar, and video with unified consent gating."""
+"""End-to-end multimodal orchestrator linking text, voice, avatar, and video with unified consent gating.
+
+Also exposes :func:`speech_pipeline_endpoint` as a thin service wrapper around
+:class:`~echoself_ai.pipeline.SpeechPipeline`.
+"""
 from dataclasses import asdict, dataclass
+import base64
+import io
+import struct
 import time
+import wave
 from typing import Any, Optional
+
+import torch
 
 from echoself_ai.service.unified import EchoSelfAIService, ProcessRequest, ProcessResult
 
@@ -135,3 +145,85 @@ class MultimodalPipeline:
             consent_audit=consent_audit,
             execution_time_ms=total_latency,
         )
+
+
+# ---------------------------------------------------------------------------
+# speech_pipeline endpoint
+# ---------------------------------------------------------------------------
+
+def _tensor_to_b64_wav(waveform: torch.Tensor, sample_rate: int) -> str:
+    """Encode a waveform tensor as a base64-encoded WAV byte string."""
+    flat = waveform.detach().cpu().float().squeeze()
+    clamped = torch.clamp(flat, -1.0, 1.0)
+    ints = (clamped * 32767.0).to(torch.int16).tolist()
+    raw_bytes = struct.pack(f"<{len(ints)}h", *ints)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(raw_bytes)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("ascii")
+
+
+def speech_pipeline_endpoint(
+    input_waveform: torch.Tensor,
+    sample_rate: int = 16000,
+    user_id: Optional[str] = None,
+    text_input: Optional[str] = None,
+    pipeline_config: Optional[Any] = None,
+) -> dict[str, Any]:
+    """Service endpoint that wraps :class:`~echoself_ai.pipeline.SpeechPipeline`.
+
+    Accepts a raw waveform (or text_input) and returns a JSON-serialisable
+    dict containing the pipeline result — including base64-encoded WAV audio
+    when output audio was produced.
+
+    Args:
+        input_waveform: 1-D float32 waveform tensor.
+        sample_rate: Sample rate of *input_waveform* in Hz.
+        user_id: Optional user identifier forwarded to the audit log.
+        text_input: When provided, skip ASR and synthesise this text directly.
+        pipeline_config: Optional :class:`~echoself_ai.pipeline.PipelineConfig`.
+            Defaults to a standard config when None.
+
+    Returns:
+        Dict with keys: ``job_id``, ``transcript``, ``audio_base64``,
+        ``audio_sample_rate``, ``watermark_id``, ``detection_result``,
+        ``audit_event_id``, ``stage_latencies``, ``total_latency_ms``,
+        ``real_time_factor``, ``success``, ``error``.
+    """
+    from echoself_ai.pipeline import SpeechPipeline, PipelineConfig
+
+    cfg = pipeline_config if pipeline_config is not None else PipelineConfig(sample_rate=sample_rate)
+    pipeline = SpeechPipeline(config=cfg)
+    result = pipeline.process(
+        input_waveform,
+        sample_rate=sample_rate,
+        user_id=user_id,
+        text_input=text_input,
+    )
+
+    audio_b64 = ""
+    if result.output_waveform is not None and result.output_sample_rate is not None:
+        try:
+            audio_b64 = _tensor_to_b64_wav(result.output_waveform, result.output_sample_rate)
+        except Exception:
+            audio_b64 = ""
+
+    return {
+        "job_id": result.job_id,
+        "transcript": result.transcript,
+        "audio_base64": audio_b64,
+        "audio_sample_rate": result.output_sample_rate,
+        "watermark_id": result.watermark_id,
+        "detection_result": result.detection_result,
+        "audit_event_id": result.audit_event_id,
+        "stage_latencies": result.stage_latencies,
+        "total_latency_ms": result.total_latency_ms,
+        "real_time_factor": result.real_time_factor,
+        "success": result.success,
+        "error": result.error,
+    }
