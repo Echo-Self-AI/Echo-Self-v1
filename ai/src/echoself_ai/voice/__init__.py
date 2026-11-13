@@ -1,4 +1,6 @@
 """Voice AI subsystem for EchoSelf."""
+from echoself_ai.voice.asr import ASRModel, CTCDecoder, SpeechRecognizer, train_asr_smoke
+from echoself_ai.voice.asr_config import ASRConfig
 from echoself_ai.voice.acoustic_model import AcousticModel, AcousticModelConfig
 from echoself_ai.voice.vad import (
     EnergyVAD,
@@ -38,6 +40,11 @@ from echoself_ai.voice.features import (
 from echoself_ai.voice.vocoder import GriffinLimVocoder, VoiceSynthesizer
 
 __all__ = [
+    "ASRConfig",
+    "ASRModel",
+    "CTCDecoder",
+    "SpeechRecognizer",
+    "train_asr_smoke",
     "AcousticModel",
     "AcousticModelConfig",
     "EnergyVAD",
