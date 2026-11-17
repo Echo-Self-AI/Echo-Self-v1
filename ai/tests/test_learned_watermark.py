@@ -354,6 +354,8 @@ class TestCompareWithClassical:
 
     def test_classical_detected_on_watermarked(self, trained_watermarker, config):
         """Classical method should detect its own watermark."""
+        # Use a fixed seed so this test is deterministic regardless of suite order.
+        torch.manual_seed(42)
         waveform = torch.randn(config.segment_length)
         result = trained_watermarker.compare_with_classical(
             waveform, watermark_id="test-wm-id-detect"
