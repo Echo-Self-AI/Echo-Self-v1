@@ -154,6 +154,26 @@ function buildPayload(job_type: string, rest: Record<string, unknown>): Record<s
         speaker_id: rest.speaker_id ?? "demo-speaker",
         audio_base64: rest.audio_base64 ?? null,
       };
+    case "portrait_process":
+      return {
+        image_base64: rest.image_base64 ?? null,
+        avatar_id: rest.avatar_id ?? "primary",
+      };
+    case "portrait_load":
+      return {
+        avatar_id: rest.avatar_id ?? "primary",
+      };
+    case "talking_head_video":
+      return {
+        avatar_id: rest.avatar_id ?? "primary",
+        portrait_base64: rest.portrait_base64 ?? null,
+        audio_base64: rest.audio_base64 ?? null,
+        text: rest.text ?? rest.text_input ?? null,
+        speaker_id: rest.speaker_id ?? null,
+        fps: rest.fps ?? 25,
+        width: rest.width ?? 512,
+        height: rest.height ?? 512,
+      };
     case "avatar_embedding":
       return {
         avatar_id: rest.avatar_id ?? "demo-avatar",

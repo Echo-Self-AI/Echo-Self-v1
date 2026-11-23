@@ -14,6 +14,14 @@ from echoself_ai.service.unified import (
     ProcessResult,
 )
 
+# Register portrait + talking-head video extensions
+try:
+    import echoself_ai.service.extensions  # noqa: F401
+except Exception as _ext_err:
+    logging.getLogger("echoself_ai.server").warning(
+        "Failed to load service extensions: %s", _ext_err
+    )
+
 logger = logging.getLogger("echoself_ai.server")
 
 
